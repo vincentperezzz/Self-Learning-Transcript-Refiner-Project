@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi.responses import PlainTextResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from typing import Optional
 
@@ -196,6 +197,72 @@ def delete_session(session_id: int, user: dict = Depends(get_current_user)) -> d
             (session_id, user["id"]),
         )
     return {"status": "deleted"}
+
+
+@router.get("/sessions/{session_id}/download")
+def download_session(
+    session_id: int,
+    format: str = Query("timestamped", description="transcript | timestamped | results"),
+    user: dict = Depends(get_current_user),
+) -> PlainTextResponse:
+    """
+    Download transcript in one of three formats:
+    - transcript: plain text only
+    - timestamped: text with [start - end] timestamps
+    - results: timestamped + correction annotations
+    """
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT filename, result_json FROM transcription_sessions "
+            "WHERE id = %s AND user_id = %s",
+            (session_id, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = row["result_json"]
+    if isinstance(result, str):
+        result = json.loads(result)
+
+    segments = result.get("segments", [])
+    lines: list[str] = []
+
+    for seg in segments:
+        start = seg["start"]
+        end = seg["end"]
+
+        if format == "transcript":
+            lines.append(seg["refined_text"])
+        elif format == "timestamped":
+            lines.append(f"[{_fmt_ts(start)} - {_fmt_ts(end)}]  {seg['refined_text']}")
+        elif format == "results":
+            lines.append(f"[{_fmt_ts(start)} - {_fmt_ts(end)}]  {seg['refined_text']}")
+            if seg.get("corrections"):
+                for c in seg["corrections"]:
+                    lines.append(
+                        f"    ✓ [{c['source']}] \"{c['original']}\" → \"{c['corrected']}\""
+                    )
+            if seg["original_text"] != seg["refined_text"]:
+                lines.append(f"    (original: {seg['original_text']})")
+        else:
+            raise HTTPException(status_code=400, detail="format must be: transcript | timestamped | results")
+
+    basename = row["filename"].rsplit(".", 1)[0] if "." in row["filename"] else row["filename"]
+    content = "\n".join(lines)
+    return PlainTextResponse(
+        content=content,
+        headers={
+            "Content-Disposition": f'attachment; filename="{basename}_{format}.txt"',
+        },
+    )
+
+
+def _fmt_ts(seconds: float) -> str:
+    m = int(seconds) // 60
+    s = int(seconds) % 60
+    ms = int((seconds % 1) * 10)
+    return f"{m}:{s:02d}.{ms}"
 
 
 def _save_session(

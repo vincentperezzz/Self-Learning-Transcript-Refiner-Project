@@ -6,6 +6,7 @@ import StatusBar from "./StatusBar";
 
 const NAV = [
   { to: "/", label: "Dashboard", icon: "📊" },
+  { to: "/upload", label: "Upload", icon: "🎙️" },
   { to: "/lexicon", label: "Lexicon", icon: "📖" },
   { to: "/account", label: "Account", icon: "👤" },
 ];

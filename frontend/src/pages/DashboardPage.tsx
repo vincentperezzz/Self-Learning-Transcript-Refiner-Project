@@ -1,131 +1,131 @@
-import { useEffect, useState, type ChangeEvent } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { deleteSession, listSessions, transcribeAudio } from "../api";
-import type { RefinementResponse, SessionSummary } from "../types";
-import ResultsPanel from "../components/ResultsPanel";
+import { deleteSession, listSessions } from "../api";
+import type { SessionSummary } from "../types";
 
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [uploadResult, setUploadResult] = useState<RefinementResponse | null>(null);
-  const [error, setError] = useState("");
-  const [speaker, setSpeaker] = useState("agent");
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadSessions();
   }, []);
 
   async function loadSessions() {
+    setLoading(true);
     try {
       const data = await listSessions();
-      setSessions(data.sessions);
-    } catch {}
-  }
-
-  async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setLoading(true);
-    setError("");
-    setUploadResult(null);
-    try {
-      const res = await transcribeAudio(file, speaker);
-      setUploadResult(res);
-      loadSessions(); // refresh history
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Upload failed");
+      setSessions(data.sessions ?? []);
+    } catch {
+      /* ignore */
     } finally {
       setLoading(false);
     }
   }
 
   async function handleDelete(id: number) {
+    if (!confirm("Delete this session?")) return;
     try {
       await deleteSession(id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
-    } catch {}
+    } catch {
+      /* ignore */
+    }
   }
 
   return (
-    <div className="space-y-8">
-      {/* Upload section */}
-      <section className="bg-gray-900 rounded-xl border border-gray-800 p-6">
-        <h2 className="text-lg font-semibold mb-4">Upload Audio</h2>
-        <div className="flex items-center gap-4">
-          <select
-            value={speaker}
-            onChange={(e) => setSpeaker(e.target.value)}
-            className="rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-200"
-          >
-            <option value="agent">Agent</option>
-            <option value="client">Client</option>
-          </select>
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">Past Refinements</h1>
+        <button
+          onClick={() => navigate("/upload")}
+          className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium transition-colors"
+        >
+          + New Upload
+        </button>
+      </div>
 
-          <label
-            className={`px-5 py-2 rounded-lg text-sm font-medium cursor-pointer transition-colors
-              ${loading ? "bg-gray-700 opacity-50 cursor-wait" : "bg-sky-600 hover:bg-sky-500"}`}
+      {loading ? (
+        <p className="text-gray-500 text-sm">Loading sessions...</p>
+      ) : sessions.length === 0 ? (
+        <div className="bg-gray-900/60 border border-gray-800 rounded-xl p-10 text-center">
+          <p className="text-gray-400 mb-3">No refinement sessions yet.</p>
+          <button
+            onClick={() => navigate("/upload")}
+            className="text-sky-400 hover:text-sky-300 text-sm font-medium"
           >
-            {loading ? "Transcribing..." : "Choose Audio File"}
-            <input
-              type="file"
-              accept="audio/*"
-              onChange={handleUpload}
-              disabled={loading}
-              className="hidden"
-            />
-          </label>
+            Upload your first audio file →
+          </button>
         </div>
-
-        {error && (
-          <div className="mt-4 rounded-lg bg-red-900/30 border border-red-800 p-3 text-sm text-red-300">
-            {error}
+      ) : (
+        <div className="bg-gray-900/60 border border-gray-800 rounded-xl overflow-hidden">
+          {/* Table header */}
+          <div className="grid grid-cols-12 gap-2 px-5 py-3 text-[11px] uppercase tracking-wider text-gray-500 border-b border-gray-800">
+            <div className="col-span-4">File</div>
+            <div className="col-span-2">Speaker</div>
+            <div className="col-span-1 text-center">Segments</div>
+            <div className="col-span-1 text-center">Fixes</div>
+            <div className="col-span-3">Date</div>
+            <div className="col-span-1"></div>
           </div>
-        )}
-      </section>
 
-      {/* Latest result */}
-      {uploadResult && (
-        <ResultsPanel
-          segments={uploadResult.segments}
-          totalCorrections={uploadResult.total_corrections}
-        />
-      )}
-
-      {/* Session history */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4">Past Refinements</h2>
-        {sessions.length === 0 ? (
-          <p className="text-gray-500 text-sm">No sessions yet. Upload an audio file above.</p>
-        ) : (
-          <div className="space-y-2">
-            {sessions.map((s) => (
-              <div
-                key={s.id}
-                className="flex items-center justify-between bg-gray-900 rounded-lg border border-gray-800 px-4 py-3"
-              >
+          {/* Rows */}
+          {sessions.map((s) => (
+            <div
+              key={s.id}
+              className="grid grid-cols-12 gap-2 px-5 py-3 items-center border-b border-gray-800/50
+                         hover:bg-gray-800/40 transition-colors cursor-pointer"
+              onClick={() => navigate(`/sessions/${s.id}`)}
+            >
+              <div className="col-span-4 text-sm text-gray-200 truncate font-medium">
+                {s.filename}
+              </div>
+              <div className="col-span-2 text-sm text-gray-400">
+                {s.speaker ? (
+                  <span
+                    className={`px-2 py-0.5 rounded text-xs ${
+                      s.speaker === "agent"
+                        ? "bg-sky-900/40 text-sky-300"
+                        : "bg-amber-900/40 text-amber-300"
+                    }`}
+                  >
+                    {s.speaker}
+                  </span>
+                ) : (
+                  <span className="text-gray-600">—</span>
+                )}
+              </div>
+              <div className="col-span-1 text-center text-sm text-gray-400">
+                {s.total_segments}
+              </div>
+              <div className="col-span-1 text-center">
+                {s.total_corrections > 0 ? (
+                  <span className="text-sm text-emerald-400 font-medium">
+                    {s.total_corrections}
+                  </span>
+                ) : (
+                  <span className="text-sm text-gray-600">0</span>
+                )}
+              </div>
+              <div className="col-span-3 text-xs text-gray-500">
+                {new Date(s.created_at).toLocaleString()}
+              </div>
+              <div className="col-span-1 text-right">
                 <button
-                  onClick={() => navigate(`/sessions/${s.id}`)}
-                  className="flex-1 text-left hover:text-sky-400 transition-colors"
-                >
-                  <div className="text-sm font-medium">{s.filename}</div>
-                  <div className="text-xs text-gray-500 mt-0.5">
-                    {new Date(s.created_at).toLocaleString()} &middot;{" "}
-                    {s.total_segments} segments &middot; {s.total_corrections} corrections
-                    {s.speaker && <> &middot; {s.speaker}</>}
-                  </div>
-                </button>
-                <button
-                  onClick={() => handleDelete(s.id)}
-                  className="ml-3 text-xs text-gray-600 hover:text-red-400 transition-colors"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDelete(s.id);
+                  }}
+                  className="text-xs text-gray-600 hover:text-red-400 transition-colors"
                 >
                   Delete
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-      </section>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

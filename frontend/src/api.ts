@@ -153,6 +153,29 @@ export function deleteSession(id: number) {
   return request<{ status: string }>(`/sessions/${id}`, { method: "DELETE" });
 }
 
+export async function downloadSession(
+  id: number,
+  format: "transcript" | "timestamped" | "results",
+): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}/sessions/${id}/download?format=${format}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error("Download failed");
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition") || "";
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] || `session_${id}_${format}.txt`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ---------------------------------------------------------------------------
 // Lexicon
 // ---------------------------------------------------------------------------

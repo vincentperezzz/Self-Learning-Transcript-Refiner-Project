@@ -3,6 +3,7 @@ import { getToken } from "./api";
 import Layout from "./components/Layout";
 import LoginPage from "./pages/LoginPage";
 import DashboardPage from "./pages/DashboardPage";
+import UploadPage from "./pages/UploadPage";
 import SessionDetailPage from "./pages/SessionDetailPage";
 import LexiconPage from "./pages/LexiconPage";
 import AccountPage from "./pages/AccountPage";
@@ -25,6 +26,7 @@ export default function App() {
           }
         >
           <Route index element={<DashboardPage />} />
+          <Route path="upload" element={<UploadPage />} />
           <Route path="sessions/:id" element={<SessionDetailPage />} />
           <Route path="lexicon" element={<LexiconPage />} />
           <Route path="account" element={<AccountPage />} />
