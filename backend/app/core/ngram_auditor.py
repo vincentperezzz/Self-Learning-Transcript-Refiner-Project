@@ -8,7 +8,8 @@ plausible versus an alternative correction.
 Flow (from the architecture diagram):
   1. Break transcript into overlapping trigrams.
   2. Look up each trigram's frequency in Table B (Redis cache → PG fallback).
-  3. If an alternative trigram scores significantly higher, flag for swap.
+  3. If an alternative trigram scores significantly higher AND the differing
+     word is phonetically similar (edit distance), flag for swap.
 """
 
 from __future__ import annotations
@@ -27,6 +28,53 @@ from app.cache import (
 from app.database import get_db
 
 
+# ---------------------------------------------------------------------------
+# Levenshtein distance for phonetic similarity guard
+# ---------------------------------------------------------------------------
+
+def _levenshtein(a: str, b: str) -> int:
+    """Compute Levenshtein edit distance between two strings."""
+    if len(a) < len(b):
+        return _levenshtein(b, a)
+    if len(b) == 0:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a):
+        curr = [i + 1]
+        for j, cb in enumerate(b):
+            cost = 0 if ca == cb else 1
+            curr.append(min(curr[j] + 1, prev[j + 1] + 1, prev[j] + cost))
+        prev = curr
+    return prev[-1]
+
+
+def _is_phonetically_similar(original: str, suggested: str) -> bool:
+    """
+    Guard: only allow swap when the differing words are plausibly
+    phonetic confusions (not completely unrelated words).
+
+    Rules:
+      - Short words (len <= 2): block all swaps
+      - Length ratio (shorter/longer) must be >= 0.6
+      - Words len 3-4: edit distance <= 1
+      - Longer words: edit distance <= ceil(max_len * 0.3)
+    """
+    a, b = original.lower(), suggested.lower()
+    if a == b:
+        return True
+    min_len = min(len(a), len(b))
+    max_len = max(len(a), len(b))
+    if max_len <= 2:
+        return False  # don't swap tiny words like "ni"→"of", "to"→"me"
+    # Block when words differ too much in length (different word entirely)
+    if min_len / max_len < 0.6:
+        return False
+    dist = _levenshtein(a, b)
+    if max_len <= 4:
+        return dist <= 1
+    return dist <= -(-max_len * 30 // 100)  # ceil(max_len * 0.3)
+
+
 @dataclass
 class TrigramCandidate:
     """A potential correction suggested by N-Gram analysis."""
@@ -42,14 +90,20 @@ class NGramAuditor:
     Queries the trigram frequency table and suggests corrections when
     an alternative 3-word sequence is overwhelmingly more common.
 
+    Guards against false positives:
+      - Only swaps when original trigram has ZERO frequency (unknown)
+      - Suggested alternative must have frequency >= MIN_SUGGESTED_FREQ
+      - Differing word must pass phonetic similarity check (edit distance)
+      - Confidence ratio must exceed SWAP_THRESHOLD (0.97)
+
     Usage:
         auditor = NGramAuditor()
         auditor.build_trigrams("over the recorded deadline")
         candidates = auditor.audit()
     """
 
-    # Minimum ratio for the suggested trigram to be considered a swap
-    SWAP_THRESHOLD: float = 0.80
+    SWAP_THRESHOLD: float = 0.97
+    MIN_SUGGESTED_FREQ: int = 5
 
     def __init__(self, swap_threshold: Optional[float] = None) -> None:
         if swap_threshold is not None:
@@ -150,8 +204,13 @@ class NGramAuditor:
     def audit(self) -> list[TrigramCandidate]:
         """
         For each trigram from the last `build_trigrams` call, check if a
-        higher-frequency alternative exists. Returns swap candidates whose
-        confidence exceeds SWAP_THRESHOLD.
+        higher-frequency alternative exists.
+
+        Guards:
+          1. Original trigram must have frequency == 0 (unknown to the system).
+          2. Alternative must have frequency >= MIN_SUGGESTED_FREQ.
+          3. The differing word must be phonetically similar (edit distance).
+          4. Confidence must exceed SWAP_THRESHOLD.
         """
         candidates: list[TrigramCandidate] = []
 
@@ -159,13 +218,22 @@ class NGramAuditor:
             w1, w2, w3 = tri
             orig_freq = self.lookup_frequency(w1, w2, w3)
 
+            # Guard 1: If the original trigram has any frequency at all,
+            # it's a known-valid sequence – skip it entirely.
+            if orig_freq > 0:
+                continue
+
             # Strategy 1: same prefix (w1, w2), different w3
             for alt_w3, alt_freq in self.find_alternatives(w1, w2):
                 if alt_w3 == w3:
                     continue
-                total = alt_freq + orig_freq
-                if total == 0:
+                # Guard 2: alternative must be well-attested
+                if alt_freq < self.MIN_SUGGESTED_FREQ:
                     continue
+                # Guard 3: phonetic similarity check
+                if not _is_phonetically_similar(w3, alt_w3):
+                    continue
+                total = alt_freq + orig_freq
                 conf = alt_freq / total
                 if conf >= self.SWAP_THRESHOLD:
                     candidates.append(
@@ -182,9 +250,13 @@ class NGramAuditor:
             for alt_w1, alt_freq in self.find_alternatives_by_suffix(w2, w3):
                 if alt_w1 == w1:
                     continue
-                total = alt_freq + orig_freq
-                if total == 0:
+                # Guard 2: alternative must be well-attested
+                if alt_freq < self.MIN_SUGGESTED_FREQ:
                     continue
+                # Guard 3: phonetic similarity check
+                if not _is_phonetically_similar(w1, alt_w1):
+                    continue
+                total = alt_freq + orig_freq
                 conf = alt_freq / total
                 if conf >= self.SWAP_THRESHOLD:
                     candidates.append(

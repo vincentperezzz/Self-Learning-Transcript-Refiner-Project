@@ -16,6 +16,9 @@ CORRECTION_THRESHOLD = int(os.getenv("CORRECTION_THRESHOLD", "5"))
 LOW_CONFIDENCE_THRESHOLD = float(os.getenv("LOW_CONFIDENCE_THRESHOLD", "0.90"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
-# Lightning AI – Remote Whisper endpoint
-LIGHTNING_API_URL = os.getenv("LIGHTNING_API_URL", "")
-LIGHTNING_API_KEY = os.getenv("LIGHTNING_API_KEY", "")
+# Groq – Hosted Whisper large-v3-turbo
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_WHISPER_URL = os.getenv(
+    "GROQ_WHISPER_URL",
+    "https://api.groq.com/openai/v1/audio/transcriptions",
+)

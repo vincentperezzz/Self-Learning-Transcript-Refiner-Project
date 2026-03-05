@@ -25,9 +25,24 @@ def seed_lexicon() -> int:
         ("Be encouraged", "We encourage you", "phrasing error", None),
         ("Ms. Marina", "Ms. Marie", "name misheard", None),
         ("record deadline", "recorded line", "phonetic confusion", "collections"),
-        ("spm.spmadridlaw.com", "spm@spmadridlaw.com", "email @ misheard as dot", "collections"),
+        ("spm.spmadridlaw.com", "spm@spmadridlaw.com", "email @ misheard as dot", None),
+        ("SPM at SPMadridLaw.com", "spm@spmadridlaw.com", "email dictation", None),
+        ("SPM at SPMadridLaw dot com", "spm@spmadridlaw.com", "email dictation", None),
         ("1delacruz@spmadridlaw.com", "jdelacruz@spmadridlaw.com", "email initial misheard", None),
         ("wandelacruz@spmadridlaw.com", "jdelacruz@spmadridlaw.com", "email name misheard", None),
+        # Double-word corrections (Whisper repetition artifacts)
+        ("birth date", "birthdate", "Whisper word split", None),
+        ("birthdate date", "birthdate", "Whisper repetition", None),
+        ("subject is subject", "subject", "Whisper repetition", "banking"),
+        ("masettle settle", "masettle", "Whisper repetition", "banking"),
+        # Number / currency prefix normalization
+        ("P5,", "\u20b15,", "currency prefix", "banking"),
+        ("P10,", "\u20b110,", "currency prefix", "banking"),
+        ("P15,", "\u20b115,", "currency prefix", "banking"),
+        ("P20,", "\u20b120,", "currency prefix", "banking"),
+        ("P25,", "\u20b125,", "currency prefix", "banking"),
+        ("P30,", "\u20b130,", "currency prefix", "banking"),
+        ("P50,", "\u20b150,", "currency prefix", "banking"),
     ]
 
     count = 0
@@ -59,21 +74,27 @@ def seed_ngrams() -> int:
         "over the recorded line and accredited service provider of Future Bank",
         "Before we proceed for verification purposes only please dictate your birthdate",
         "Okay thank you for verification",
-        # Banking / account context
+        # Banking / account context – BALANCED (total vs minimum)
         "I'm calling on behalf of Future Bank with regards to your past due credit card account",
         "which is subject to suspension today",
         "subject for suspension today",
         "your total amount due is",
+        "the total amount due on your account",
         "your minimum amount due for immediate settlement today",
-        "kailangan nyo na masettle yung minimum amount due",
+        "the minimum amount due for this billing period",
+        "kailangan niyo na masettle yung minimum amount due",
+        "kailangan niyo na masettle yung total amount due",
         "settling just a partial amount might not be enough to prevent the suspension",
         "the minimum amount due is designed to help keep your account in good standing",
-        "baka magkaroon pa ng mas malaking impact sa credit score nyo",
+        "baka magkaroon pa ng mas malaking impact sa credit score niyo",
         "please ensure na lang din magawan ito ng paraan today to keep your account active",
+        "to keep your account stays active",
         "settlement under account number ending in",
         "at any branch of Future Bank or via online banking",
         # Collections patterns
         "Let me inform you that the line will be recorded for security purposes",
+        "I'd like to inform you that the call is being recorded",
+        "I'd like to inform you about the status of your account",
         "The line will be recorded for security purposes",
         "This is Jared De La Paz from SP Madrid and Associates Law Firm calling on behalf of Future Bank",
         "This is Anna Castro from SP Madrid and Associates Law Firm calling on behalf of Future Bank",
@@ -86,14 +107,19 @@ def seed_ngrams() -> int:
         "Once paid pakisend ng copy of receipt",
         # Probing / RFD / SOF
         "May I ask if there is a specific reason for the delay in payment",
-        "Ano pala yung magiging source of funds nyo for settlement",
+        "is there a specific reason for the delay",
+        "Ano ho pala yung magiging source of funds niyo for settlement",
+        "Ano pala yung magiging source of funds niyo for settlement",
         "may we know the reason for the delay",
         "May I know your source of funds for settlement",
         # Empathy / negotiation
         "Naiintindihan ko po ang inyong sitwasyon",
         "Naintindihan ko po na mahirap",
         "I understand your situation",
+        "We're here to help",
+        "here to help you with your account",
         # Closing
+        "If you need any assistance with the payment process feel free to reach out",
         "If you need any assistance feel free to reach out",
         "Thank you and have a good day",
         "Thank you and have a nice day",
@@ -104,7 +130,13 @@ def seed_ngrams() -> int:
         "Hindi pa kasi dumadating yung remittance galing sa anak ko",
         "Babayaran ko naman pero hindi pa ngayon",
         "Nagka problema lang talaga sa finances recently",
+        "Nagkaproblema lang talaga sa finances ko",
         "Sa remittance from my husband",
+        # Taglish patterns with "ho" politeness and "niyo"
+        "Ano ho pala yung magiging plan niyo for the settlement",
+        "Ganun ho ba yung sitwasyon niyo ngayon",
+        "Pwede ho bang malaman yung reason for the delay",
+        "Tama ho ba na kayo si Miss Marie Santos",
     ]
 
     from app.core.ngram_auditor import NGramAuditor
@@ -120,6 +152,11 @@ def seed_ngrams() -> int:
 def main() -> None:
     print("Initialising database...")
     init_db()
+
+    print("Seeding default admin user...")
+    from app.auth import seed_default_admin
+    seed_default_admin()
+    print("  -> Default admin ready (admin/admin).")
 
     print("Seeding Lexicon (Table A)...")
     lex_count = seed_lexicon()

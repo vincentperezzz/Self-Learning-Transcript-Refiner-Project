@@ -40,8 +40,7 @@ services:
     environment:
       - DATABASE_URL=postgresql://phoenix:phoenix@postgres:5432/phoenix
       - REDIS_URL=redis://redis:6379/0
-      - LIGHTNING_API_URL=${LIGHTNING_API_URL:-}
-      - LIGHTNING_API_KEY=${LIGHTNING_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - CORRECTION_THRESHOLD=5
     depends_on:

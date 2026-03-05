@@ -4,13 +4,15 @@ CorrectionEngine – Orchestrates the 3-layer correction hierarchy.
 Layer 1: Lexicon Check (Permanent Rules / Known Fixes)
 Layer 2: N-Gram + Anchor logic for contextual rescoring
 Layer 3: DistilBERT [MASK] prediction (stub – for low-confidence anomalies < 0.90)
+Post:    Currency normalizer (P/$→₱) + double-word deduplication
 
-Each segment flows through all three layers sequentially.
+Each segment flows through all three layers sequentially, then post-processing.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 
 from app.core.correction_log import CorrectionLogger
@@ -50,20 +52,25 @@ class CorrectionEngine:
     def refine(self, request: RefinementRequest) -> RefinementResponse:
         """Run the full correction pipeline on a list of segments."""
 
-        # 1. Build full transcript for anchor scanning
-        full_text = " ".join(seg.text for seg in request.segments)
-        self.anchor_manager.scan(full_text)
-        active_mode = self.anchor_manager.active_mode
-
+        segments = request.segments
         refined_segments: list[RefinedSegment] = []
         total_corrections = 0
 
-        for seg in request.segments:
-            refined, corrections = self._refine_segment(seg, active_mode)
+        for idx, seg in enumerate(segments):
+            # Build a context window: 1 segment before + 1 segment after
+            ctx_before = segments[idx - 1].text if idx > 0 else ""
+            ctx_after = segments[idx + 1].text if idx < len(segments) - 1 else ""
+
+            # Determine anchor mode dynamically per segment
+            seg_mode = self.anchor_manager.scan_segment(
+                seg.text, ctx_before, ctx_after
+            )
+
+            refined, corrections = self._refine_segment(seg, seg_mode)
             total_corrections += len(corrections)
             refined_segments.append(refined)
 
-        # 2. Ingest the *corrected* text into N-Gram table for learning
+        # Ingest the *corrected* text into N-Gram table for learning
         corrected_full = " ".join(rs.refined_text for rs in refined_segments)
         self.ngram_auditor.ingest_text(corrected_full)
 
@@ -113,6 +120,14 @@ class CorrectionEngine:
         if has_low_conf:
             text, bert_corrections = self._layer_distilbert(text, flagged_words)
             all_corrections.extend(bert_corrections)
+
+        # --- Post-processing: currency normalizer ---
+        text, currency_corrections = self._post_currency(text)
+        all_corrections.extend(currency_corrections)
+
+        # --- Post-processing: double-word deduplication ---
+        text, dedup_corrections = self._post_dedup_words(text)
+        all_corrections.extend(dedup_corrections)
 
         # Log every correction for the self-learning loop
         for c in all_corrections:
@@ -186,3 +201,49 @@ class CorrectionEngine:
         else:
             logger.info("DistilBERT layer invoked (stub) for: %s", text[:80])
         return text, []
+
+    # ------------------------------------------------------------------
+    # Post-processing
+    # ------------------------------------------------------------------
+
+    # Regex: P or $ followed by digits (currency amounts) → ₱
+    _CURRENCY_RE = re.compile(
+        r'(?<![a-zA-Z])'   # not preceded by a letter
+        r'[P$]'            # P or $
+        r'(?=\d)'          # followed by a digit
+    )
+
+    def _post_currency(self, text: str) -> tuple[str, list[CorrectionDetail]]:
+        """Normalize P5,000 / $5,000 → ₱5,000."""
+        details: list[CorrectionDetail] = []
+        new_text = self._CURRENCY_RE.sub("₱", text)
+        if new_text != text:
+            details.append(
+                CorrectionDetail(
+                    original="P/$ currency prefix",
+                    corrected="₱ (PHP)",
+                    source=CorrectionSource.LEXICON,
+                )
+            )
+        return new_text, details
+
+    # Regex: consecutive duplicate words (case-insensitive)
+    _DOUBLE_WORD_RE = re.compile(
+        r'\b(\w+)\s+\1\b',
+        re.IGNORECASE,
+    )
+
+    def _post_dedup_words(self, text: str) -> tuple[str, list[CorrectionDetail]]:
+        """Remove accidental double words: 'birthdate date' isn't caught here,
+        but exact duplicates like 'settle settle' are."""
+        details: list[CorrectionDetail] = []
+        new_text = self._DOUBLE_WORD_RE.sub(r'\1', text)
+        if new_text != text:
+            details.append(
+                CorrectionDetail(
+                    original="double word",
+                    corrected="deduplicated",
+                    source=CorrectionSource.LEXICON,
+                )
+            )
+        return new_text, details

@@ -121,6 +121,17 @@ _DEFAULT_ANCHORS: list[dict] = [
         "mode": AnchorMode.VERIFICATION,
         "label": "birthdate_check",
     },
+    # Note-taking / detail capture (pen and paper context)
+    {
+        "pattern": r"(pen\s*and\s*paper|take\s*note|take\s*down|jot\s*down)",
+        "mode": AnchorMode.COLLECTIONS,
+        "label": "note_taking",
+    },
+    {
+        "pattern": r"(email\s*address|contact\s*number|ticket\s*number|reference\s*number)",
+        "mode": AnchorMode.COLLECTIONS,
+        "label": "detail_capture",
+    },
 ]
 
 
@@ -183,6 +194,26 @@ class SemanticAnchorManager:
             self._active_mode = AnchorMode.GENERAL
 
         return list(self._hits)
+
+    def scan_segment(
+        self,
+        segment_text: str,
+        context_before: str = "",
+        context_after: str = "",
+    ) -> AnchorMode:
+        """
+        Scan a single segment (plus optional surrounding context) and return
+        the best anchor mode for that segment.  Does NOT alter the manager's
+        global state (self._hits / self._active_mode).
+        """
+        combined = f"{context_before} {segment_text} {context_after}"
+        votes: dict[AnchorMode, int] = {}
+        for anchor in self._anchors:
+            for _ in anchor.pattern.finditer(combined):
+                votes[anchor.mode] = votes.get(anchor.mode, 0) + 1
+        if votes:
+            return max(votes, key=lambda m: votes[m])
+        return AnchorMode.GENERAL
 
     @property
     def active_mode(self) -> AnchorMode:

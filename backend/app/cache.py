@@ -100,3 +100,7 @@ def ngram_alt_suffix_cache_key(w2: str, w3: str) -> str:
 
 def lexicon_cache_key(anchor_mode: Optional[str] = None) -> str:
     return f"lexicon:{anchor_mode or 'all'}"
+
+
+# Alias for convenience
+cache_delete_pattern = cache_invalidate_prefix

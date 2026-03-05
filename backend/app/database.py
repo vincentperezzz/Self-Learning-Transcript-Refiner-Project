@@ -85,9 +85,31 @@ CREATE TABLE IF NOT EXISTS correction_log (
     UNIQUE(original_phrase, corrected_phrase)
 );
 
+-- Users
+CREATE TABLE IF NOT EXISTS users (
+    id            SERIAL PRIMARY KEY,
+    username      TEXT    UNIQUE NOT NULL,
+    password_hash TEXT    NOT NULL,
+    role          TEXT    NOT NULL DEFAULT 'user',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Transcription Sessions
+CREATE TABLE IF NOT EXISTS transcription_sessions (
+    id                SERIAL PRIMARY KEY,
+    filename          TEXT    NOT NULL,
+    speaker           TEXT,
+    user_id           INTEGER REFERENCES users(id),
+    total_segments    INTEGER NOT NULL DEFAULT 0,
+    total_corrections INTEGER NOT NULL DEFAULT 0,
+    result_json       JSONB,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_ngram_words ON ngram_frequency(word1, word2, word3);
 CREATE INDEX IF NOT EXISTS idx_lexicon_wrong ON lexicon(wrong_phrase);
 CREATE INDEX IF NOT EXISTS idx_correction_log_occ ON correction_log(occurrences);
+CREATE INDEX IF NOT EXISTS idx_sessions_user ON transcription_sessions(user_id);
 """
 
 
