@@ -56,6 +56,9 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
     environment:
       - VITE_API_URL=http://localhost:8000/api/v1
     depends_on:

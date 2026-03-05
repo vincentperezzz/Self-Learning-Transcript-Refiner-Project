@@ -48,3 +48,40 @@ export interface HealthResponse {
   status: string;
   service: string;
 }
+
+// Auth
+export interface User {
+  id: number;
+  username: string;
+  role: string;
+}
+
+export interface TokenResponse {
+  access_token: string;
+  token_type: string;
+}
+
+// Sessions
+export interface SessionSummary {
+  id: number;
+  filename: string;
+  speaker: string | null;
+  total_segments: number;
+  total_corrections: number;
+  created_at: string;
+}
+
+export interface SessionDetail extends SessionSummary {
+  result_json: RefinementResponse;
+}
+
+// Lexicon
+export interface LexiconRule {
+  id: number;
+  wrong_phrase: string;
+  correct_phrase: string;
+  context_hint: string | null;
+  anchor_mode: string | null;
+  is_permanent: boolean;
+  created_at: string;
+}

@@ -6,10 +6,10 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
+import bcrypt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 from pydantic import BaseModel
 
 from app.database import get_db
@@ -22,7 +22,6 @@ SECRET_KEY = os.getenv("JWT_SECRET_KEY", "phoenix-3-secret-change-in-prod")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 480  # 8 hours
 
-pwd_ctx = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
@@ -57,11 +56,11 @@ class PasswordChange(BaseModel):
 # ---------------------------------------------------------------------------
 
 def hash_password(plain: str) -> str:
-    return pwd_ctx.hash(plain)
+    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_ctx.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 # ---------------------------------------------------------------------------
