@@ -128,26 +128,29 @@ export default function SessionDetailPage() {
           <button
             onClick={() => handleDownload("transcript")}
             disabled={downloading}
-            className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 transition-colors"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-sm text-white font-medium transition-colors disabled:opacity-50"
             title="Download transcript text only"
           >
-            ↓ Text
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+            Transcript
           </button>
           <button
             onClick={() => handleDownload("timestamped")}
             disabled={downloading}
-            className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 transition-colors"
-            title="Download with timestamps"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-sky-700 hover:bg-sky-600 text-sm text-white font-medium transition-colors disabled:opacity-50"
+            title="Download transcript with timestamps"
           >
-            ↓ Timestamps
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+            Timestamps
           </button>
           <button
             onClick={() => handleDownload("results")}
             disabled={downloading}
-            className="px-3 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs text-gray-300 transition-colors"
-            title="Download with correction annotations"
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 text-sm text-white font-medium transition-colors disabled:opacity-50"
+            title="Download full results with corrections"
           >
-            ↓ Full Results
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5m0 0l5-5m-5 5V3" /></svg>
+            Full Results
           </button>
         </div>
       </div>
@@ -186,8 +189,8 @@ function SegmentRow({
 
   if (view === "timestamped") {
     return (
-      <div className="flex gap-3 py-1.5 px-3 hover:bg-gray-900/40 rounded transition-colors">
-        <span className="text-xs text-gray-600 font-mono whitespace-nowrap pt-0.5 min-w-[90px]">
+      <div className="flex py-2 px-3 hover:bg-gray-900/40 rounded transition-colors">
+        <span className="text-xs text-gray-500 font-mono whitespace-nowrap pt-0.5 w-[130px] shrink-0 text-right pr-4">
           {fmt(seg.start)} – {fmt(seg.end)}
         </span>
         <p className="text-sm text-gray-200 leading-relaxed">
@@ -199,13 +202,7 @@ function SegmentRow({
 
   /* results view */
   return (
-    <div
-      className={`rounded-lg p-4 mb-2 border transition-colors ${
-        hasFixes
-          ? "bg-gray-800/60 border-gray-700"
-          : "bg-transparent border-transparent hover:bg-gray-900/40"
-      }`}
-    >
+    <div className="rounded-lg p-4 mb-2 border bg-gray-800/60 border-gray-700 transition-colors">
       {/* Timestamp + mode badge */}
       <div className="flex items-center gap-3 mb-2 text-xs text-gray-500">
         <span className="font-mono">
