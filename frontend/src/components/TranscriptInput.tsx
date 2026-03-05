@@ -60,7 +60,7 @@ export default function TranscriptInput({ onRefine, onUpload, loading }: Props) 
           value={raw}
           onChange={(e) => setRaw(e.target.value)}
           placeholder={PLACEHOLDER}
-          rows={10}
+          style={{ height: "330px" }}
           className="w-full rounded-lg bg-gray-800 border border-gray-700 p-3 text-sm font-mono
                      text-gray-200 placeholder:text-gray-600 focus:outline-none focus:ring-2
                      focus:ring-sky-600 resize-y"
