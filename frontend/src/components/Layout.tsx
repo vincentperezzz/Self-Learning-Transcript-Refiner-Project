@@ -30,9 +30,9 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
-      <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col">
+      <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 h-screen sticky top-0">
         <div className="p-4 border-b border-gray-800">
           <h1 className="text-lg font-bold tracking-tight">
             Phoenix <span className="text-sky-400">3.0</span>
@@ -80,7 +80,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-y-auto h-screen">
         <div className="max-w-5xl mx-auto px-6 py-8">
           <Outlet />
         </div>
