@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import PlainTextResponse
@@ -128,14 +129,15 @@ async def transcribe_and_refine(
         raise HTTPException(status_code=400, detail="Empty audio file")
 
     filename = file.filename or "audio.wav"
+    session_key = uuid.uuid4().hex
 
     # Create session immediately with "processing" status
     with get_db() as conn:
         cur = conn.execute(
             "INSERT INTO transcription_sessions "
-            "(filename, speaker, user_id, status, total_segments, total_corrections) "
-            "VALUES (%s, %s, %s, 'processing', 0, 0) RETURNING id",
-            (filename, speaker, user["id"]),
+            "(session_key, filename, speaker, user_id, status, total_segments, total_corrections) "
+            "VALUES (%s, %s, %s, %s, 'processing', 0, 0) RETURNING id",
+            (session_key, filename, speaker, user["id"]),
         )
         row = cur.fetchone()
         session_id = row["id"]
@@ -145,7 +147,7 @@ async def transcribe_and_refine(
         _process_transcription_sync, session_id, audio_bytes, filename, speaker, language
     )
 
-    return {"session_id": session_id, "status": "processing"}
+    return {"session_key": session_key, "status": "processing"}
 
 
 def _process_transcription_sync(
@@ -212,7 +214,7 @@ def refine_transcript(
 def list_sessions(user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT id, filename, speaker, status, total_segments, total_corrections, created_at "
+            "SELECT id, session_key, filename, speaker, status, total_segments, total_corrections, created_at "
             "FROM transcription_sessions "
             "WHERE user_id = %s "
             "ORDER BY created_at DESC",
@@ -222,15 +224,15 @@ def list_sessions(user: dict = Depends(get_current_user)) -> dict:
     return {"sessions": [dict(r) for r in rows]}
 
 
-@router.get("/sessions/{session_id}")
-def get_session(session_id: int, user: dict = Depends(get_current_user)) -> dict:
+@router.get("/sessions/{session_key}")
+def get_session(session_key: str, user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT id, filename, speaker, status, total_segments, total_corrections, "
+            "SELECT id, session_key, filename, speaker, status, total_segments, total_corrections, "
             "result_json, error_message, created_at "
             "FROM transcription_sessions "
-            "WHERE id = %s AND user_id = %s",
-            (session_id, user["id"]),
+            "WHERE session_key = %s AND user_id = %s",
+            (session_key, user["id"]),
         )
         row = cur.fetchone()
     if not row:
@@ -242,19 +244,19 @@ def get_session(session_id: int, user: dict = Depends(get_current_user)) -> dict
     return out
 
 
-@router.delete("/sessions/{session_id}")
-def delete_session(session_id: int, user: dict = Depends(get_current_user)) -> dict:
+@router.delete("/sessions/{session_key}")
+def delete_session(session_key: str, user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         conn.execute(
-            "DELETE FROM transcription_sessions WHERE id = %s AND user_id = %s",
-            (session_id, user["id"]),
+            "DELETE FROM transcription_sessions WHERE session_key = %s AND user_id = %s",
+            (session_key, user["id"]),
         )
     return {"status": "deleted"}
 
 
-@router.get("/sessions/{session_id}/download")
+@router.get("/sessions/{session_key}/download")
 def download_session(
-    session_id: int,
+    session_key: str,
     format: str = Query("timestamped", description="transcript | timestamped | results"),
     user: dict = Depends(get_current_user),
 ) -> PlainTextResponse:
@@ -267,8 +269,8 @@ def download_session(
     with get_db() as conn:
         cur = conn.execute(
             "SELECT filename, result_json FROM transcription_sessions "
-            "WHERE id = %s AND user_id = %s",
-            (session_id, user["id"]),
+            "WHERE session_key = %s AND user_id = %s",
+            (session_key, user["id"]),
         )
         row = cur.fetchone()
     if not row:

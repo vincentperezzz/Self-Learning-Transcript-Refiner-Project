@@ -15,7 +15,7 @@ function fmt(seconds: number): string {
 const SOURCE_BADGE: Record<string, string> = {
   lexicon: "bg-emerald-800/60 text-emerald-300",
   ngram_anchor: "bg-sky-800/60 text-sky-300",
-  distilbert: "bg-violet-800/60 text-violet-300",
+  gemini: "bg-violet-800/60 text-violet-300",
 };
 
 function confColor(p: number): string {
@@ -25,7 +25,7 @@ function confColor(p: number): string {
 }
 
 export default function SessionDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { key } = useParams<{ key: string }>();
   const navigate = useNavigate();
   const [session, setSession] = useState<SessionDetail | null>(null);
   const [error, setError] = useState("");
@@ -35,8 +35,8 @@ export default function SessionDetailPage() {
   const [pollCount, setPollCount] = useState(0);
 
   const loadSession = useCallback(() => {
-    if (!id) return;
-    getSession(Number(id))
+    if (!key) return;
+    getSession(key)
       .then((data) => {
         setSession(data);
         setPollCount((c) => c + 1);
@@ -47,7 +47,7 @@ export default function SessionDetailPage() {
         }
       })
       .catch(() => setError("Session not found"));
-  }, [id]);
+  }, [key]);
 
   useEffect(() => {
     loadSession();
@@ -59,10 +59,10 @@ export default function SessionDetailPage() {
   }, [loadSession]);
 
   async function handleDownload(format: ViewMode) {
-    if (!id) return;
+    if (!key) return;
     setDownloading(true);
     try {
-      await downloadSession(Number(id), format);
+      await downloadSession(key, format);
     } catch {
       /* ignore */
     } finally {
@@ -122,7 +122,7 @@ export default function SessionDetailPage() {
             <span className="text-gray-700">→</span>
             <span>N-Gram</span>
             <span className="text-gray-700">→</span>
-            <span>DistilBERT</span>
+            <span>Gemini</span>
           </div>
         </div>
       </div>

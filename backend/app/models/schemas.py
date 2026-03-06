@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 class CorrectionSource(str, Enum):
     LEXICON = "lexicon"
     NGRAM_ANCHOR = "ngram_anchor"
-    DISTILBERT = "distilbert"
+    GEMINI = "gemini"
 
 
 class AnchorMode(str, Enum):

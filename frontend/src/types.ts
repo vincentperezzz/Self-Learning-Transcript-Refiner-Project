@@ -18,7 +18,7 @@ export interface TranscriptSegment {
 export interface CorrectionDetail {
   original: string;
   corrected: string;
-  source: "lexicon" | "ngram_anchor" | "distilbert";
+  source: "lexicon" | "ngram_anchor" | "gemini";
   confidence_delta?: number;
 }
 
@@ -64,6 +64,7 @@ export interface TokenResponse {
 // Sessions
 export interface SessionSummary {
   id: number;
+  session_key: string;
   filename: string;
   speaker: string | null;
   status: "processing" | "completed" | "failed";

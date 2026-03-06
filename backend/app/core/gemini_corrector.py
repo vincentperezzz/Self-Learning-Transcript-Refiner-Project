@@ -1,0 +1,330 @@
+"""
+Gemini 2.5 Flash Corrector – Layer 3.
+
+After Lexicon (L1) and N-Gram (L2) have done their corrections, this module
+sends the full transcript to Gemini for analysis of remaining errors.
+
+Gemini acts as a "teacher":
+1. Identifies Whisper transcription errors that L1/L2 couldn't catch
+2. Suggests corrections in Philippine call-center + Tagalog context
+3. Each correction is auto-added to the lexicon for future matching
+
+Over time, the lexicon grows and Gemini is called less frequently.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+
+import httpx
+
+from app.config import GEMINI_API_KEY
+from app.database import get_db
+
+logger = logging.getLogger(__name__)
+
+GEMINI_API_URL = (
+    "https://generativelanguage.googleapis.com/v1beta/models/"
+    "gemini-2.5-flash:generateContent"
+)
+
+SYSTEM_PROMPT = """\
+You are an expert QA auditor and transcript corrector for a Philippine COLLECTION \
+AGENCY call center. Transcripts are produced by Whisper ASR (speech-to-text).
+
+═══ SETTING ═══
+These calls are DEBT COLLECTION calls between a Collection Agent and a Borrower/Client. \
+The agency (SP Madrid Law Firm / SP Madrid and Associates) collects on behalf of \
+Future Bank. Agents speak in a mix of English and Filipino/Tagalog (code-switching \
+mid-sentence is NORMAL).
+
+═══ TYPICAL CALL FLOW ═══
+Collection calls follow a structured QA-graded flow. The agent is scored on each phase:
+
+1. OPENING & GREETING (5%)
+   - Must include "Kamusta" or polite greeting
+   - Agent identifies self and agency: "This is [Name] from SP Madrid Law Firm"
+   - Mentions "over the recorded line" / consent to record
+
+2. ACCOUNT VERIFICATION (5%)
+   - Verify borrower identity: birthdate, name confirmation
+   - "tama ho ba?" / "please dictate your birthdate"
+
+3. ACCOUNT STATUS / PURPOSE OF CALL
+   - Inform about past due credit card, outstanding balance, minimum amount due
+   - "subject to/for suspension today"
+   - Total amount due, minimum amount due figures
+
+4. EFFECTIVE PROBING (10%)
+   - RFD (Reason for Delinquency/Delay): "bakit naging delayed ang settlement"
+   - SOF (Source of Funds): "ano yung magiging source of funds niyo"
+   - SOI (Source of Income): employment status, remittance, allotment
+
+5. NEGOTIATION & HIERARCHY (10%)
+   - Stick twice on Outstanding Balance (OB) before alternatives
+   - Hierarchy: H1 PIF Today → H2 Partial Today → H3 PIF Tomorrow → H4 Partial arrangement
+   - WIIFM (What's In It For Me) reoffer
+   - Benefits: good standing, avoid further collection, credit score
+   - Consequences: suspension, legal proceedings, case filing, higher department
+
+6. COMMITMENT TO PAY / PTP (Promise To Pay)
+   - Secure amount, date, and payment method
+   - "commitment to pay" / "kailan at magkano"
+
+7. SOLIDIFYING / RECAP (5%)
+   - Recap arrangement: When, Amount, Payment method
+   - Benefits & consequences reiteration
+   - Payment channels: Future Bank branch, online banking, GCash, Bayad Center
+
+8. CLOSING (5%)
+   - Polite closing, "Thank you and have a good day" / "Walang anuman, ingat po"
+
+═══ KEY INTENT CATEGORIES (from QA Regex Grading) ═══
+These are the categories agents are graded on. Understanding them helps you \
+recognize what the agent/borrower is trying to say:
+
+OPENING: greeting_intent, introductory_intent, identified_self_and_agency_intent, \
+consent_to_record_intent, line_is_recorded_intent, properly_identified_self_intent
+
+VERIFICATION: customer_verification_intent, pid_name_intent, pid_birthday_intent, \
+pid_address_intent, pid_email_intent, pid_dob_intent
+
+ACCOUNT STATUS: account_status_intent, account_information_intent, \
+explained_account_status_intent, outstanding_balance_intent, ob_intent, \
+minimum_amount_intent, daily_interest_intent, inform_ob_intent, inform_due_date_intent
+
+PROBING: rfd_intent (Reason for Delay), sof_intent (Source of Funds), \
+soi_intent (Source of Income), capacity_to_pay_intent, reason_for_non_payment_today_intent, \
+check_for_source_of_funds_intent, asked_if_ch_received_demand_or_notification_letter_intent
+
+NEGOTIATION: hierarchy_pay_intent, h1_pif_today_intent, h2_wiifm_reoffer_today_intent, \
+h3_pif_tomorrow_intent, h4_partial_payment_today_tomorrow_intent, \
+negotiation_heirarchy_intent, stick_twice_ob_intent, closing_attempts_intent, \
+four_closing_attempts_per_call_intent, buying_question_intent, objection_handling_intent
+
+BENEFITS & CONSEQUENCES: benefits_intent, consequences_intent, \
+benefits_and_consequences_discussion_intent, soft_consequences_intent
+
+PAYMENT ARRANGEMENT: commitment_to_pay_intent, ptp_arrangement_intent, \
+payment_arrangement_intent, payment_channel_intent, mode_of_payment_intent, \
+amount_intent, date_intent, when_intent, secured_payment_intent
+
+SETTLEMENT TYPES: full_payment_intent, partial_payment_intent, discounted_intent, \
+installment_intent, split_intent, downpayment_intent, temporary_payment_arrangement_intent
+
+RECAP: recap_intent, recap_amount_intent, recap_mop_intent, recap_when_intent, \
+summarized_arrangement_intent
+
+FOLLOW-UP: ffup_reason_for_broken_promise_intent, ffup_confirm_payment_amount_intent, \
+ffup_confirm_payment_method_intent, ffup_ask_new_ptp_sched_intent, \
+broken_promise_test_intent, follow_up_calls_intent
+
+3RD PARTY CALLS: 3pc_alternative_number_intent, 3pc_best_time_to_call_intent, \
+3pc_relation_to_borrower_intent, 3pc_borrower_address_intent, \
+3pc_callback_request_intent, 3pc_message_contact_intent
+
+EMPATHY: empathy_intent, active_listening_intent, acknowledgement_intent, \
+showed_empathy_and_compassion_intent
+
+CLOSING: closing_intent, closing_test_roni, leave_a_rope_intent, \
+expect_call_back_intent, return_call_intent
+
+═══ DOMAIN VOCABULARY ═══
+Common terms in this collection context:
+- OB = Outstanding Balance
+- PIF = Pay In Full
+- PTP = Promise To Pay
+- RFD = Reason for Delinquency/Delay
+- SOF = Source of Funds
+- SOI = Source of Income
+- WIIFM = What's In It For Me (agent reoffer technique)
+- BTC = Best Time to Call
+- Ben/Con = Benefits and Consequences
+- MOP = Mode of Payment
+- 3PC = Third Party Contact (calling someone other than the borrower)
+- Past Due = Overdue amount
+- Curing Amount = Amount needed to bring account current
+- Amnesty = Special discount/forgiveness program
+- Demand Letter / Notification Letter = formal collection notice
+
+═══ YOUR TASK ═══
+1. Identify words/phrases that are clearly Whisper transcription ERRORS.
+2. Provide the correct word/phrase replacement.
+3. Focus on: proper nouns, company names, Filipino/Tagalog words that Whisper \
+mangled, financial terms, call-center script phrases, collection-specific terminology.
+
+═══ RULES — DO NOT CHANGE ═══
+- Correctly transcribed Tagalog/Filipino words (even if unusual to English speakers)
+- Normal code-switching patterns (mixing English and Tagalog is expected)
+- Words already correct even if informal
+- Grammar or style (only fix ASR transcription errors, not language quality)
+- Already-correct currency symbols like ₱
+- Words/phrases that are ALREADY in the EXISTING LEXICON (listed below) — \
+our system already handles those
+
+═══ IMPORTANT CONTEXT ═══
+- "ho/po" are Filipino politeness particles — do NOT change them
+- "na/ng/nyo/niyo/yung/kailangan/pasuyo/pakisend" etc. are common Tagalog words
+- Company names, email addresses, and proper nouns should be preserved exactly
+- Agent often says compliance phrases like "over the recorded line"
+- Borrower often mentions remittance, allotment, salary as source of funds
+- Common negotiation phrases: "magawan ng paraan", "i-settle", "masettle", "makakapag-settle"
+
+Respond with EXACTLY a JSON array of correction objects. Each object must have:
+- "segment_index": the 0-based index of the segment
+- "original": the exact wrong word/phrase as it appears in the transcript
+- "corrected": the correct replacement
+
+If a segment needs NO corrections, omit it entirely.
+If the ENTIRE transcript needs no corrections, respond with: []
+
+RESPOND WITH ONLY THE JSON ARRAY. No explanation, no markdown fencing."""
+
+
+@dataclass
+class GeminiCorrection:
+    """A single correction suggested by Gemini."""
+    segment_index: int
+    original: str
+    corrected: str
+
+
+def _fetch_lexicon_rules() -> list[dict]:
+    """Load current lexicon rules from DB for inclusion in the Gemini prompt."""
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "SELECT wrong_phrase, correct_phrase FROM lexicon "
+                "ORDER BY wrong_phrase LIMIT 500"
+            )
+            return [{"wrong": r["wrong_phrase"], "correct": r["correct_phrase"]} for r in cur.fetchall()]
+    except Exception as e:
+        logger.warning("Could not load lexicon for Gemini prompt: %s", e)
+        return []
+
+
+def correct_transcript_sync(
+    segments: list[dict],
+    low_confidence_words: list[dict] | None = None,
+) -> list[GeminiCorrection]:
+    """
+    Send the full transcript to Gemini for correction analysis.
+
+    Args:
+        segments: List of dicts with keys: index, text, start, end
+        low_confidence_words: Optional list of {segment_index, word, probability}
+
+    Returns:
+        List of GeminiCorrection objects
+    """
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY not set — skipping Gemini correction layer")
+        return []
+
+    # Build transcript text for the prompt
+    transcript_lines = []
+    for seg in segments:
+        transcript_lines.append(
+            f"[{seg['index']}] [{seg['start']:.1f}s-{seg['end']:.1f}s] {seg['text']}"
+        )
+    transcript_text = "\n".join(transcript_lines)
+
+    # Build low-confidence section
+    low_conf_text = ""
+    if low_confidence_words:
+        low_conf_lines = []
+        for w in low_confidence_words:
+            low_conf_lines.append(
+                f"  Segment {w['segment_index']}: \"{w['word']}\" "
+                f"(confidence: {w['probability']:.0%})"
+            )
+        low_conf_text = (
+            "\n\nLOW-CONFIDENCE WORDS (Whisper was uncertain about these):\n"
+            + "\n".join(low_conf_lines)
+        )
+
+    # Build existing lexicon section so Gemini avoids duplicating known rules
+    lexicon_rules = _fetch_lexicon_rules()
+    lexicon_text = ""
+    if lexicon_rules:
+        lexicon_lines = [f"  \"{r['wrong']}\" → \"{r['correct']}\"" for r in lexicon_rules]
+        lexicon_text = (
+            "\n\nEXISTING LEXICON (our system already corrects these — do NOT duplicate):\n"
+            + "\n".join(lexicon_lines)
+        )
+
+    user_message = f"TRANSCRIPT:\n{transcript_text}{low_conf_text}{lexicon_text}"
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": SYSTEM_PROMPT + "\n\n" + user_message}
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.1,
+            "maxOutputTokens": 4096,
+        },
+    }
+
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(
+                f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        # Extract response text
+        text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "[]")
+            .strip()
+        )
+
+        # Clean markdown fencing if present
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+
+        corrections_raw = json.loads(text)
+        if not isinstance(corrections_raw, list):
+            logger.warning("Gemini returned non-list: %s", type(corrections_raw))
+            return []
+
+        corrections = []
+        for item in corrections_raw:
+            if not isinstance(item, dict):
+                continue
+            seg_idx = item.get("segment_index")
+            orig = item.get("original", "").strip()
+            corr = item.get("corrected", "").strip()
+            if seg_idx is not None and orig and corr and orig != corr:
+                corrections.append(
+                    GeminiCorrection(
+                        segment_index=int(seg_idx),
+                        original=orig,
+                        corrected=corr,
+                    )
+                )
+
+        logger.info("Gemini suggested %d corrections", len(corrections))
+        return corrections
+
+    except httpx.HTTPStatusError as e:
+        logger.error("Gemini API error %d: %s", e.response.status_code, e.response.text[:300])
+        return []
+    except json.JSONDecodeError as e:
+        logger.error("Gemini returned invalid JSON: %s", e)
+        return []
+    except Exception as e:
+        logger.error("Gemini corrector error: %s", e, exc_info=True)
+        return []

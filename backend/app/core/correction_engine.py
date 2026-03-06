@@ -1,12 +1,13 @@
 """
-CorrectionEngine – Orchestrates the 3-layer correction hierarchy.
+CorrectionEngine – Orchestrates the correction pipeline.
 
 Layer 1: Lexicon Check (Permanent Rules / Known Fixes)
 Layer 2: N-Gram + Anchor logic for contextual rescoring
-Layer 3: DistilBERT [MASK] prediction (stub – for low-confidence anomalies < 0.90)
 Post:    Currency normalizer (P/$→₱) + double-word deduplication
+Layer 3: Gemini 2.5 Flash (analyzes remaining errors, teaches the lexicon)
 
-Each segment flows through all three layers sequentially, then post-processing.
+Gemini acts as a "teacher" — corrections are applied to the current transcript
+AND auto-added to the lexicon so future transcripts are handled by L1 directly.
 """
 
 from __future__ import annotations
@@ -16,10 +17,12 @@ import re
 from typing import Optional
 
 from app.core.correction_log import CorrectionLogger
+from app.core.gemini_corrector import GeminiCorrection, correct_transcript_sync
 from app.core.lexicon import LexiconChecker
 from app.core.ngram_auditor import NGramAuditor
 from app.core.semantic_anchors import SemanticAnchorManager
 from app.config import LOW_CONFIDENCE_THRESHOLD
+from app.database import get_db
 from app.models.schemas import (
     AnchorMode,
     CorrectionDetail,
@@ -56,12 +59,12 @@ class CorrectionEngine:
         refined_segments: list[RefinedSegment] = []
         total_corrections = 0
 
+        # --- Pass 1: Lexicon + N-Gram + post-processing per segment ---
+        all_flagged: list[dict] = []
         for idx, seg in enumerate(segments):
-            # Build a context window: 1 segment before + 1 segment after
             ctx_before = segments[idx - 1].text if idx > 0 else ""
             ctx_after = segments[idx + 1].text if idx < len(segments) - 1 else ""
 
-            # Determine anchor mode dynamically per segment
             seg_mode = self.anchor_manager.scan_segment(
                 seg.text, ctx_before, ctx_after
             )
@@ -69,6 +72,71 @@ class CorrectionEngine:
             refined, corrections = self._refine_segment(seg, seg_mode)
             total_corrections += len(corrections)
             refined_segments.append(refined)
+
+            # Collect low-confidence words for Gemini
+            for fw in refined.low_confidence_words:
+                all_flagged.append({
+                    "segment_index": idx,
+                    "word": fw.word,
+                    "probability": fw.probability,
+                })
+
+        # --- Pass 2: Gemini correction for remaining issues ---
+        # Determine which segments need Gemini analysis:
+        #   1) Segments with low-confidence words
+        #   2) Segments where L1/L2 made no corrections (unknown patterns)
+        needs_gemini = False
+        for idx, rs in enumerate(refined_segments):
+            has_low_conf = len(rs.low_confidence_words) > 0
+            had_no_fixes = len(rs.corrections) == 0
+            if has_low_conf or had_no_fixes:
+                needs_gemini = True
+                break
+
+        if needs_gemini:
+            gemini_input = [
+                {
+                    "index": idx,
+                    "text": rs.refined_text,
+                    "start": rs.start,
+                    "end": rs.end,
+                }
+                for idx, rs in enumerate(refined_segments)
+            ]
+
+            gemini_corrections = correct_transcript_sync(
+                segments=gemini_input,
+                low_confidence_words=all_flagged if all_flagged else None,
+            )
+
+            # Apply Gemini corrections and auto-learn
+            for gc in gemini_corrections:
+                if 0 <= gc.segment_index < len(refined_segments):
+                    rs = refined_segments[gc.segment_index]
+                    # Apply correction to the refined text
+                    pattern = re.compile(re.escape(gc.original), re.IGNORECASE)
+                    new_text = pattern.sub(gc.corrected, rs.refined_text, count=1)
+                    if new_text != rs.refined_text:
+                        rs.refined_text = new_text
+                        correction = CorrectionDetail(
+                            original=gc.original,
+                            corrected=gc.corrected,
+                            source=CorrectionSource.GEMINI,
+                        )
+                        rs.corrections.append(correction)
+                        total_corrections += 1
+
+                        # Log for self-learning
+                        self.correction_logger.log(
+                            gc.original, gc.corrected, CorrectionSource.GEMINI
+                        )
+
+                        # Auto-add to lexicon for future matching
+                        self._auto_add_lexicon_rule(gc)
+                        logger.info(
+                            "Gemini corrected [seg %d]: '%s' → '%s'",
+                            gc.segment_index, gc.original, gc.corrected,
+                        )
 
         # Ingest the *corrected* text into N-Gram table for learning
         corrected_full = " ".join(rs.refined_text for rs in refined_segments)
@@ -112,14 +180,6 @@ class CorrectionEngine:
                 for w in seg.words
                 if w.probability < LOW_CONFIDENCE_THRESHOLD
             ]
-
-        # --- Layer 3: DistilBERT (targets low-confidence words) ---
-        has_low_conf = bool(flagged_words) or (
-            seg.confidence is not None and seg.confidence < LOW_CONFIDENCE_THRESHOLD
-        )
-        if has_low_conf:
-            text, bert_corrections = self._layer_distilbert(text, flagged_words)
-            all_corrections.extend(bert_corrections)
 
         # --- Post-processing: currency normalizer ---
         text, currency_corrections = self._post_currency(text)
@@ -188,57 +248,18 @@ class CorrectionEngine:
                 )
         return text, details
 
-    def _layer_distilbert(
-        self, text: str, flagged: list[FlaggedWord] | None = None,
-    ) -> tuple[str, list[CorrectionDetail]]:
-        """
-        Layer 3: DistilBERT [MASK] prediction for low-confidence words.
-
-        For each flagged word, mask it in context and ask DistilBERT to predict
-        the most likely replacement. If the prediction differs from the original
-        and has sufficient model confidence, apply the correction.
-        """
-        if not flagged:
-            logger.debug("DistilBERT layer: no flagged words, skipping.")
-            return text, []
-
-        from app.core.distilbert_predictor import predict_masked_word
-
-        details: list[CorrectionDetail] = []
-        # Sort by probability ascending so we fix the worst words first
-        sorted_flagged = sorted(flagged, key=lambda fw: fw.probability)
-
-        for fw in sorted_flagged:
-            result = predict_masked_word(
-                text=text,
-                target_word=fw.word,
-                target_start=fw.start,
-                min_model_score=0.15,
-            )
-            if result is None:
-                continue
-
-            predicted, score = result
-
-            # Replace the word in the text (first occurrence, word-boundary aware)
-            pattern = re.compile(r"\b" + re.escape(fw.word) + r"\b", re.IGNORECASE)
-            new_text = pattern.sub(predicted, text, count=1)
-            if new_text != text:
-                text = new_text
-                details.append(
-                    CorrectionDetail(
-                        original=fw.word,
-                        corrected=predicted,
-                        source=CorrectionSource.DISTILBERT,
-                        confidence_delta=round(score - fw.probability, 4),
-                    )
+    def _auto_add_lexicon_rule(self, gc: GeminiCorrection) -> None:
+        """Add a Gemini correction to the lexicon so L1 catches it next time."""
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
+                    "VALUES (%s, %s, %s, TRUE) "
+                    "ON CONFLICT (wrong_phrase) DO NOTHING",
+                    (gc.original.lower(), gc.corrected, "auto-learned from Gemini"),
                 )
-                logger.info(
-                    "DistilBERT corrected: '%s' → '%s' (model=%.3f, whisper=%.3f)",
-                    fw.word, predicted, score, fw.probability,
-                )
-
-        return text, details
+        except Exception as e:
+            logger.warning("Failed to auto-add lexicon rule '%s': %s", gc.original, e)
 
     # ------------------------------------------------------------------
     # Post-processing

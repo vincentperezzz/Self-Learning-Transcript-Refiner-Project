@@ -88,16 +88,46 @@ Anchors use a **context window** — they scan the previous segment, current seg
 
 ---
 
-### Layer 3: DistilBERT (AI-Powered Word Prediction)
+### Layer 3: Gemini 2.5 Flash (AI Teacher & Corrector)
 
-**Source badge on UI:** `distilbert` (purple)
+**Source badge on UI:** `gemini` (purple)
 
-This layer is currently a **stub** (placeholder) and will be activated when the DistilBERT model is integrated.
+This layer replaces the previous DistilBERT approach. Instead of blindly predicting words from statistical patterns, Gemini understands Philippine call-center context, Tagalog code-switching, and domain-specific terminology.
 
-**Intended behavior:**
-- Targets only words flagged as **low-confidence** by Whisper (see Confidence Score section below)
-- Masks the low-confidence word and uses DistilBERT to predict what word should be there based on surrounding context
-- Only triggers when the segment-level or word-level confidence is below the threshold (0.90)
+**When it triggers:**
+- Segments with **low-confidence words** (Whisper was uncertain) → always analyzed
+- Segments where **L1 + L2 made no corrections** → analyzed for unknown patterns the lexicon doesn't cover yet
+
+**How it works:**
+
+1. After L1/L2 and post-processing, the full transcript (all segments) is sent to Gemini in a **single API call** (efficient — 1 call per session, not per segment)
+
+2. Gemini receives:
+   - All segments with timestamps and the text after L1/L2 corrections
+   - A list of low-confidence words flagged by Whisper
+   - Instructions specific to Philippine call-center context (Tagalog code-switching, politeness particles like "ho/po", company names, financial terms)
+
+3. Gemini identifies remaining Whisper transcription errors and returns structured corrections
+
+4. Each correction is:
+   - **Applied** to the current transcript immediately
+   - **Logged** in the correction log with `source=gemini` for tracking
+   - **Auto-added to the lexicon** as a permanent rule so L1 catches it in future transcripts
+
+**Self-Learning Effect:**
+
+This is the key design principle — Gemini acts as a **teacher**:
+- First transcription: Gemini corrects many errors and creates lexicon rules
+- Second transcription: L1 catches the previously-learned patterns, Gemini handles only new ones
+- Over time: The lexicon grows, Gemini is called less, and the system becomes increasingly self-sufficient
+
+**Why not DistilBERT?**
+
+DistilBERT was removed because it:
+- Has no domain knowledge (Philippine call centers, Tagalog, financial terms)
+- Replaces words with the most statistically probable English word, destroying Tagalog code-switching
+- Cannot understand context (turned "feel free to reach out" into "are required to carry out")
+- Made 112 wrong "corrections" per session vs. only 9 legitimate L1/L2 fixes
 
 ---
 
@@ -129,7 +159,7 @@ When Whisper transcribes audio, it assigns a probability (0.0 to 1.0) to each wo
 
 These flagged words are:
 - Displayed in the UI with their confidence percentage
-- Targeted by Layer 3 (DistilBERT) for AI-based correction when integrated
+- Used as priority input for Layer 3 (Gemini) — segments with low-confidence words are always analyzed
 - Useful for QA reviewers to know which parts of the transcript to double-check
 
 **Important:** Confidence scores reflect Whisper's internal certainty, not whether the word is actually correct. A word can have high confidence but still be wrong (e.g., Whisper confidently transcribing "deadline" instead of the correct "line" because both sound similar).
@@ -138,17 +168,36 @@ These flagged words are:
 
 ## Self-Learning Loop
 
-The system gets smarter over time through a feedback loop:
+The system gets smarter over time through two feedback mechanisms:
 
-1. **Every correction is logged** in the `correction_log` table with: original text, corrected text, source (lexicon/ngram/distilbert), and timestamp
+### Mechanism 1: Gemini Auto-Learning (Primary)
 
+Every time Gemini corrects a word/phrase:
+1. The correction is **applied** to the current transcript
+2. The correction is **logged** in `correction_log` with `source=gemini`
+3. A **new lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (permanent)
+4. On the next transcription, **Layer 1 (Lexicon)** catches this pattern — no Gemini call needed
+
+This means the system learns from each session. Over time, the lexicon grows and Gemini handles only genuinely new, unseen errors.
+
+### Mechanism 2: Rule-of-5 Promotion (Supplementary)
+
+For corrections from L1/L2 sources:
+1. **Every correction is logged** in the `correction_log` table with: original text, corrected text, source, and timestamp
 2. **Rule of 5:** When the same correction appears 5+ times, it becomes a "promotion candidate"
-
-3. **Audit (optional):** Promotion candidates can be reviewed by Gemini 2.5 Flash to verify they're legitimate patterns, not noise
-
+3. **Audit (optional):** Promotion candidates can be reviewed by Gemini 2.5 Flash to verify they're legitimate patterns
 4. **Promotion:** Verified candidates are promoted to permanent lexicon rules
 
-5. **N-Gram growth:** After every refinement, the corrected text is ingested back into the N-gram frequency table, making the system progressively better at recognizing valid word sequences
+### Mechanism 3: N-Gram Growth
+
+After every refinement, the corrected text is ingested back into the N-gram frequency table. This makes the system progressively better at recognizing valid 3-word sequences, reducing false N-gram replacements.
+
+### Occurrence Tracking
+
+All corrections (from any source) are logged with occurrence counts. This data helps assess:
+- How often the same error appears across sessions
+- Whether high-confidence words still need correction (indicating Whisper systematic errors)
+- Whether the lexicon is growing effectively (fewer Gemini corrections over time)
 
 ---
 
@@ -197,6 +246,7 @@ Groq Whisper API (whisper-large-v3-turbo)
 ┌─────────────────────────────────────────┐
 │        Layer 1: Lexicon Lookup          │
 │     (permanent rules from Table A)      │
+│  (includes auto-learned Gemini rules)   │
 └─────────────────────────────────────────┘
     │
     ▼
@@ -208,16 +258,18 @@ Groq Whisper API (whisper-large-v3-turbo)
     │
     ▼
 ┌─────────────────────────────────────────┐
-│    Layer 3: DistilBERT [MASK] Predict   │
-│  (targets low-confidence words only)    │
-│  [STUB - not yet active]               │
+│         Post-Processing                 │
+│  • Currency normalize (P/$→₱)           │
+│  • Double-word dedup                    │
 └─────────────────────────────────────────┘
     │
     ▼
 ┌─────────────────────────────────────────┐
-│         Post-Processing                 │
-│  • Currency normalize (P/$→₱)           │
-│  • Double-word dedup                    │
+│   Layer 3: Gemini 2.5 Flash Teacher     │
+│  • Analyzes full transcript (1 API call)│
+│  • Corrects remaining Whisper errors    │
+│  • Auto-adds corrections to lexicon     │
+│  • Logs for self-learning tracking      │
 └─────────────────────────────────────────┘
     │
     ▼
@@ -225,6 +277,7 @@ Refined Transcript + Correction Details
     │
     ├──▶ Saved to DB (transcription_sessions)
     ├──▶ Corrections logged (correction_log)
+    ├──▶ New lexicon rules created (auto-learn)
     └──▶ N-grams ingested (self-learning)
 ```
 
@@ -243,6 +296,7 @@ Refined Transcript + Correction Details
 - **Backend:** FastAPI (Python 3.12), uvicorn
 - **Database:** PostgreSQL 16, Redis 7 (caching)
 - **Whisper:** Groq API (whisper-large-v3-turbo)
+- **AI Corrector:** Gemini 2.5 Flash (transcript correction + auto-learning)
 - **Frontend:** React 18, TypeScript, Tailwind CSS, Vite
 - **Auth:** JWT (HS256) + bcrypt
 - **Deployment:** Docker Compose (5 containers: postgres, redis, backend, frontend, pgadmin)

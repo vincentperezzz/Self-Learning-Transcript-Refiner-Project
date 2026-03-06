@@ -28,8 +28,8 @@ export default function UploadPage() {
     setLoading(true);
     setError("");
     try {
-      const { session_id } = await transcribeAudio(file, speaker);
-      navigate(`/sessions/${session_id}`); // redirect immediately to session page
+      const { session_key } = await transcribeAudio(file, speaker);
+      navigate(`/sessions/${session_key}`); // redirect immediately to session page
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
       setLoading(false);

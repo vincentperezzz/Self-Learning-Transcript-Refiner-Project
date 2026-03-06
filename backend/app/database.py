@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- Transcription Sessions
 CREATE TABLE IF NOT EXISTS transcription_sessions (
     id                SERIAL PRIMARY KEY,
+    session_key       TEXT    UNIQUE NOT NULL,
     filename          TEXT    NOT NULL,
     speaker           TEXT,
     user_id           INTEGER REFERENCES users(id),
@@ -109,9 +110,10 @@ CREATE TABLE IF NOT EXISTS transcription_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ngram_words ON ngram_frequency(word1, word2, word3);
-CREATE INDEX IF NOT EXISTS idx_lexicon_wrong ON lexicon(wrong_phrase);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_lexicon_wrong ON lexicon(wrong_phrase);
 CREATE INDEX IF NOT EXISTS idx_correction_log_occ ON correction_log(occurrences);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON transcription_sessions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_key ON transcription_sessions(session_key);
 """
 
 

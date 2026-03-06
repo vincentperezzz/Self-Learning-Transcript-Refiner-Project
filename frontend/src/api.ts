@@ -113,7 +113,7 @@ export function refineSegments(segments: TranscriptSegment[]) {
   });
 }
 
-export async function transcribeAudio(file: File, speaker?: string): Promise<{ session_id: number; status: string }> {
+export async function transcribeAudio(file: File, speaker?: string): Promise<{ session_key: string; status: string }> {
   const form = new FormData();
   form.append("file", file);
   const token = getToken();
@@ -134,7 +134,7 @@ export async function transcribeAudio(file: File, speaker?: string): Promise<{ s
     const body = await res.text();
     throw new Error(`API ${res.status}: ${body}`);
   }
-  return res.json() as Promise<{ session_id: number; status: string }>;
+  return res.json() as Promise<{ session_key: string; status: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,27 +145,27 @@ export function listSessions() {
   return request<{ sessions: SessionSummary[] }>("/sessions");
 }
 
-export function getSession(id: number) {
-  return request<SessionDetail>(`/sessions/${id}`);
+export function getSession(key: string) {
+  return request<SessionDetail>(`/sessions/${key}`);
 }
 
-export function deleteSession(id: number) {
-  return request<{ status: string }>(`/sessions/${id}`, { method: "DELETE" });
+export function deleteSession(key: string) {
+  return request<{ status: string }>(`/sessions/${key}`, { method: "DELETE" });
 }
 
 export async function downloadSession(
-  id: number,
+  key: string,
   format: "transcript" | "timestamped" | "results",
 ): Promise<void> {
   const token = getToken();
-  const res = await fetch(`${API_BASE}/sessions/${id}/download?format=${format}`, {
+  const res = await fetch(`${API_BASE}/sessions/${key}/download?format=${format}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new Error("Download failed");
   const blob = await res.blob();
   const disposition = res.headers.get("content-disposition") || "";
   const match = disposition.match(/filename="?([^"]+)"?/);
-  const filename = match?.[1] || `session_${id}_${format}.txt`;
+  const filename = match?.[1] || `session_${key}_${format}.txt`;
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

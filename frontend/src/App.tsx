@@ -28,7 +28,7 @@ export default function App() {
         >
           <Route index element={<DashboardPage />} />
           <Route path="upload" element={<UploadPage />} />
-          <Route path="sessions/:id" element={<SessionDetailPage />} />
+          <Route path="sessions/:key" element={<SessionDetailPage />} />
           <Route path="lexicon" element={<LexiconPage />} />
           <Route path="self-learning" element={<SelfLearningPage />} />
           <Route path="account" element={<AccountPage />} />
