@@ -113,7 +113,7 @@ export function refineSegments(segments: TranscriptSegment[]) {
   });
 }
 
-export async function transcribeAudio(file: File, speaker?: string): Promise<RefinementResponse> {
+export async function transcribeAudio(file: File, speaker?: string): Promise<{ session_id: number; status: string }> {
   const form = new FormData();
   form.append("file", file);
   const token = getToken();
@@ -134,7 +134,7 @@ export async function transcribeAudio(file: File, speaker?: string): Promise<Ref
     const body = await res.text();
     throw new Error(`API ${res.status}: ${body}`);
   }
-  return res.json() as Promise<RefinementResponse>;
+  return res.json() as Promise<{ session_id: number; status: string }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,4 +215,46 @@ export function updateLexiconRule(
 
 export function deleteLexiconRule(id: number) {
   return request<{ status: string }>(`/lexicon/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// Self-Learning / Corrections
+// ---------------------------------------------------------------------------
+
+export function getPromotionCandidates() {
+  return request<{
+    count: number;
+    candidates: {
+      original: string;
+      corrected: string;
+      source: string;
+      occurrences: number;
+    }[];
+  }>("/corrections/candidates");
+}
+
+export function triggerAutoPromote() {
+  return request<{
+    promoted: number;
+    rejected: number;
+    results: {
+      original: string;
+      corrected: string;
+      approved: boolean;
+      reason: string;
+    }[];
+  }>("/corrections/promote", { method: "POST" });
+}
+
+export function getCorrectionLog() {
+  return request<{
+    entries: {
+      original_phrase: string;
+      corrected_phrase: string;
+      source: string;
+      occurrences: number;
+      promoted: boolean;
+      last_seen_at: string;
+    }[];
+  }>("/corrections/log");
 }

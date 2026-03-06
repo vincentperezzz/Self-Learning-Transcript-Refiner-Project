@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { getSession, downloadSession } from "../api";
 import type { SessionDetail, RefinedSegment } from "../types";
@@ -31,13 +31,32 @@ export default function SessionDetailPage() {
   const [error, setError] = useState("");
   const [view, setView] = useState<ViewMode>("timestamped");
   const [downloading, setDownloading] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pollCount, setPollCount] = useState(0);
 
-  useEffect(() => {
+  const loadSession = useCallback(() => {
     if (!id) return;
     getSession(Number(id))
-      .then(setSession)
+      .then((data) => {
+        setSession(data);
+        setPollCount((c) => c + 1);
+        // Stop polling once processing is done
+        if (data.status !== "processing" && pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
+      })
       .catch(() => setError("Session not found"));
   }, [id]);
+
+  useEffect(() => {
+    loadSession();
+    // Start polling for processing sessions
+    pollRef.current = setInterval(loadSession, 3000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [loadSession]);
 
   async function handleDownload(format: ViewMode) {
     if (!id) return;
@@ -67,6 +86,74 @@ export default function SessionDetailPage() {
 
   if (!session) {
     return <p className="text-gray-500">Loading...</p>;
+  }
+
+  // Processing state – show animated waiting screen
+  if (session.status === "processing") {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate("/")} className="text-gray-400 hover:text-gray-200 text-sm">
+            ← Back
+          </button>
+          <h1 className="text-xl font-bold text-white">{session.filename}</h1>
+        </div>
+        <div className="flex flex-col items-center justify-center py-24 space-y-6">
+          <div className="relative">
+            <div className="h-16 w-16 border-4 border-sky-600/30 border-t-sky-400 rounded-full animate-spin" />
+          </div>
+          <div className="text-center space-y-2">
+            <h2 className="text-lg font-semibold text-white">Processing Audio</h2>
+            <p className="text-sm text-gray-400 max-w-sm">
+              Transcribing with Whisper and refining through the 3-layer correction pipeline.
+              This page will update automatically when complete.
+            </p>
+            <p className="text-xs text-gray-600 tabular-nums">
+              Checking... ({Math.floor(pollCount * 3)}s elapsed)
+            </p>
+          </div>
+          <div className="flex gap-3 text-xs text-gray-600">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 bg-sky-500 rounded-full animate-pulse" />
+              Groq Whisper
+            </span>
+            <span className="text-gray-700">→</span>
+            <span>Lexicon</span>
+            <span className="text-gray-700">→</span>
+            <span>N-Gram</span>
+            <span className="text-gray-700">→</span>
+            <span>DistilBERT</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Failed state
+  if (session.status === "failed") {
+    return (
+      <div className="space-y-6">
+        <div className="flex items-center gap-4">
+          <button onClick={() => navigate("/")} className="text-gray-400 hover:text-gray-200 text-sm">
+            ← Back
+          </button>
+          <h1 className="text-xl font-bold text-white">{session.filename}</h1>
+        </div>
+        <div className="flex flex-col items-center justify-center py-24 space-y-4">
+          <span className="text-5xl">❌</span>
+          <h2 className="text-lg font-semibold text-red-400">Processing Failed</h2>
+          <p className="text-sm text-gray-400 max-w-md text-center">
+            {session.error_message || "An unknown error occurred during transcription."}
+          </p>
+          <button
+            onClick={() => navigate("/upload")}
+            className="mt-4 px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-sm font-medium"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const result = session.result_json;

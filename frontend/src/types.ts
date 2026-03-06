@@ -66,6 +66,7 @@ export interface SessionSummary {
   id: number;
   filename: string;
   speaker: string | null;
+  status: "processing" | "completed" | "failed";
   total_segments: number;
   total_corrections: number;
   created_at: string;
@@ -73,6 +74,7 @@ export interface SessionSummary {
 
 export interface SessionDetail extends SessionSummary {
   result_json: RefinementResponse;
+  error_message: string | null;
 }
 
 // Lexicon

@@ -9,3 +9,9 @@ psycopg-pool>=3.1,<4.0
 redis>=5.0,<6.0
 python-jose[cryptography]>=3.3,<4.0
 bcrypt>=4.0,<5.0
+
+# Layer 3: DistilBERT fill-mask prediction
+transformers>=4.40.0,<5.0
+torch>=2.2.0
+
+# Gemini auditor (uses httpx – already included above)

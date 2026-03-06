@@ -192,15 +192,53 @@ class CorrectionEngine:
         self, text: str, flagged: list[FlaggedWord] | None = None,
     ) -> tuple[str, list[CorrectionDetail]]:
         """
-        Placeholder for DistilBERT [MASK] prediction.
-        Will target specific low-confidence words when the model is integrated.
+        Layer 3: DistilBERT [MASK] prediction for low-confidence words.
+
+        For each flagged word, mask it in context and ask DistilBERT to predict
+        the most likely replacement. If the prediction differs from the original
+        and has sufficient model confidence, apply the correction.
         """
-        if flagged:
-            words_str = ", ".join(f"{fw.word}({fw.probability:.2f})" for fw in flagged)
-            logger.info("DistilBERT layer invoked (stub) – low-conf words: %s", words_str)
-        else:
-            logger.info("DistilBERT layer invoked (stub) for: %s", text[:80])
-        return text, []
+        if not flagged:
+            logger.debug("DistilBERT layer: no flagged words, skipping.")
+            return text, []
+
+        from app.core.distilbert_predictor import predict_masked_word
+
+        details: list[CorrectionDetail] = []
+        # Sort by probability ascending so we fix the worst words first
+        sorted_flagged = sorted(flagged, key=lambda fw: fw.probability)
+
+        for fw in sorted_flagged:
+            result = predict_masked_word(
+                text=text,
+                target_word=fw.word,
+                target_start=fw.start,
+                min_model_score=0.15,
+            )
+            if result is None:
+                continue
+
+            predicted, score = result
+
+            # Replace the word in the text (first occurrence, word-boundary aware)
+            pattern = re.compile(r"\b" + re.escape(fw.word) + r"\b", re.IGNORECASE)
+            new_text = pattern.sub(predicted, text, count=1)
+            if new_text != text:
+                text = new_text
+                details.append(
+                    CorrectionDetail(
+                        original=fw.word,
+                        corrected=predicted,
+                        source=CorrectionSource.DISTILBERT,
+                        confidence_delta=round(score - fw.probability, 4),
+                    )
+                )
+                logger.info(
+                    "DistilBERT corrected: '%s' → '%s' (model=%.3f, whisper=%.3f)",
+                    fw.word, predicted, score, fw.probability,
+                )
+
+        return text, details
 
     # ------------------------------------------------------------------
     # Post-processing

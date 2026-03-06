@@ -100,9 +100,11 @@ CREATE TABLE IF NOT EXISTS transcription_sessions (
     filename          TEXT    NOT NULL,
     speaker           TEXT,
     user_id           INTEGER REFERENCES users(id),
+    status            TEXT    NOT NULL DEFAULT 'processing',
     total_segments    INTEGER NOT NULL DEFAULT 0,
     total_corrections INTEGER NOT NULL DEFAULT 0,
     result_json       JSONB,
+    error_message     TEXT,
     created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -117,3 +119,17 @@ def init_db() -> None:
     """Create tables if they don't exist."""
     with get_db() as conn:
         conn.execute(_SCHEMA_SQL)
+        # Migration: add status + error_message columns to existing installations
+        conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'transcription_sessions' AND column_name = 'status'
+                ) THEN
+                    ALTER TABLE transcription_sessions
+                        ADD COLUMN status TEXT NOT NULL DEFAULT 'completed',
+                        ADD COLUMN error_message TEXT;
+                END IF;
+            END $$;
+        """)

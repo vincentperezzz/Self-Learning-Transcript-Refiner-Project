@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { deleteSession, listSessions } from "../api";
 import type { SessionSummary } from "../types";
@@ -7,9 +7,21 @@ export default function DashboardPage() {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadSessions();
+    // Always poll — covers returning from upload page
+    pollRef.current = setInterval(() => {
+      listSessions()
+        .then((data) => {
+          setSessions(data.sessions ?? []);
+        })
+        .catch(() => {});
+    }, 3000);
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   async function loadSessions() {
@@ -97,10 +109,22 @@ export default function DashboardPage() {
                 )}
               </div>
               <div className="col-span-1 text-center text-sm text-gray-400">
-                {s.total_segments}
+                {s.status === "processing" ? (
+                  <span className="inline-flex items-center gap-1 text-xs text-sky-400">
+                    <span className="h-2 w-2 bg-sky-500 rounded-full animate-pulse" />
+                  </span>
+                ) : s.status === "failed" ? (
+                  <span className="text-xs text-red-400">✗</span>
+                ) : (
+                  s.total_segments
+                )}
               </div>
               <div className="col-span-1 text-center">
-                {s.total_corrections > 0 ? (
+                {s.status === "processing" ? (
+                  <span className="text-xs text-sky-400 animate-pulse">Processing...</span>
+                ) : s.status === "failed" ? (
+                  <span className="text-xs text-red-400">Failed</span>
+                ) : s.total_corrections > 0 ? (
                   <span className="text-sm text-emerald-400 font-medium">
                     {s.total_corrections}
                   </span>

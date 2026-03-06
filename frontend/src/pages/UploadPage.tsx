@@ -28,11 +28,10 @@ export default function UploadPage() {
     setLoading(true);
     setError("");
     try {
-      await transcribeAudio(file, speaker);
-      navigate("/"); // go to dashboard to see the new session
+      const { session_id } = await transcribeAudio(file, speaker);
+      navigate(`/sessions/${session_id}`); // redirect immediately to session page
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed");
-    } finally {
       setLoading(false);
     }
   }
@@ -132,7 +131,7 @@ export default function UploadPage() {
         {loading ? (
           <span className="flex items-center justify-center gap-2">
             <span className="h-4 w-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-            Transcribing & Refining...
+            Uploading...
           </span>
         ) : (
           "Transcribe & Refine"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import PlainTextResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from typing import Optional
@@ -26,7 +26,7 @@ from app.core.correction_engine import CorrectionEngine
 from app.core.correction_log import CorrectionLogger
 from app.core.lexicon import LexiconChecker
 from app.core.ngram_auditor import NGramAuditor
-from app.core.whisper_client import transcribe_audio
+from app.core.whisper_client import transcribe_audio_sync
 from app.database import get_db
 from app.models.schemas import (
     LexiconRule,
@@ -110,41 +110,90 @@ def delete_user(user_id: int, admin: dict = Depends(require_superadmin)) -> dict
 # TRANSCRIPTION (protected)
 # ===================================================================
 
-@router.post("/transcribe", response_model=RefinementResponse)
+@router.post("/transcribe")
 async def transcribe_and_refine(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     speaker: Optional[str] = Query(None, description="agent or client"),
     language: Optional[str] = Query(None, description="e.g. en, tl"),
     user: dict = Depends(get_current_user),
-) -> RefinementResponse:
+) -> dict:
+    """
+    Upload audio → create session immediately (status=processing)
+    → process transcription + refinement in background.
+    Returns the session ID so frontend can redirect and poll.
+    """
     audio_bytes = await file.read()
     if not audio_bytes:
         raise HTTPException(status_code=400, detail="Empty audio file")
 
-    try:
-        segments = await transcribe_audio(
-            audio_bytes=audio_bytes,
-            filename=file.filename or "audio.wav",
-            language=language,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Groq Whisper transcription failed: {exc}",
-        )
+    filename = file.filename or "audio.wav"
 
-    request = RefinementRequest(segments=segments, speaker=speaker)
-    result = _engine.refine(request)
+    # Create session immediately with "processing" status
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO transcription_sessions "
+            "(filename, speaker, user_id, status, total_segments, total_corrections) "
+            "VALUES (%s, %s, %s, 'processing', 0, 0) RETURNING id",
+            (filename, speaker, user["id"]),
+        )
+        row = cur.fetchone()
+        session_id = row["id"]
 
-    # Save session to DB
-    _save_session(
-        filename=file.filename or "audio.wav",
-        speaker=speaker,
-        user_id=user["id"],
-        result=result,
+    # Process in background (sync — runs in thread pool)
+    background_tasks.add_task(
+        _process_transcription_sync, session_id, audio_bytes, filename, speaker, language
     )
 
-    return result
+    return {"session_id": session_id, "status": "processing"}
+
+
+def _process_transcription_sync(
+    session_id: int,
+    audio_bytes: bytes,
+    filename: str,
+    speaker: Optional[str],
+    language: Optional[str],
+) -> None:
+    """Background task (sync): transcribe via Groq, refine, update session."""
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        log.info("BG task started for session %s", session_id)
+        segments = transcribe_audio_sync(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            language=language,
+        )
+
+        request = RefinementRequest(segments=segments, speaker=speaker)
+        result = _engine.refine(request)
+        result_dict = result.model_dump(mode="json")
+
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions "
+                "SET status = 'completed', total_segments = %s, "
+                "total_corrections = %s, result_json = %s "
+                "WHERE id = %s",
+                (
+                    len(result.segments),
+                    result.total_corrections,
+                    json.dumps(result_dict),
+                    session_id,
+                ),
+            )
+        log.info("BG task completed for session %s: %d segments, %d corrections",
+                 session_id, len(result.segments), result.total_corrections)
+    except Exception as exc:
+        log.error("Transcription failed for session %s: %s", session_id, exc, exc_info=True)
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions "
+                "SET status = 'failed', error_message = %s "
+                "WHERE id = %s",
+                (str(exc)[:500], session_id),
+            )
 
 
 @router.post("/refine", response_model=RefinementResponse)
@@ -163,7 +212,7 @@ def refine_transcript(
 def list_sessions(user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT id, filename, speaker, total_segments, total_corrections, created_at "
+            "SELECT id, filename, speaker, status, total_segments, total_corrections, created_at "
             "FROM transcription_sessions "
             "WHERE user_id = %s "
             "ORDER BY created_at DESC",
@@ -177,8 +226,8 @@ def list_sessions(user: dict = Depends(get_current_user)) -> dict:
 def get_session(session_id: int, user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT id, filename, speaker, total_segments, total_corrections, "
-            "result_json, created_at "
+            "SELECT id, filename, speaker, status, total_segments, total_corrections, "
+            "result_json, error_message, created_at "
             "FROM transcription_sessions "
             "WHERE id = %s AND user_id = %s",
             (session_id, user["id"]),
@@ -186,7 +235,11 @@ def get_session(session_id: int, user: dict = Depends(get_current_user)) -> dict
         row = cur.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
-    return dict(row)
+    out = dict(row)
+    # Ensure result_json is parsed (PG may return it as a string)
+    if isinstance(out.get("result_json"), str):
+        out["result_json"] = json.loads(out["result_json"])
+    return out
 
 
 @router.delete("/sessions/{session_id}")
@@ -263,29 +316,6 @@ def _fmt_ts(seconds: float) -> str:
     s = int(seconds) % 60
     ms = int((seconds % 1) * 10)
     return f"{m}:{s:02d}.{ms}"
-
-
-def _save_session(
-    filename: str,
-    speaker: Optional[str],
-    user_id: int,
-    result: RefinementResponse,
-) -> None:
-    result_dict = result.model_dump(mode="json")
-    with get_db() as conn:
-        conn.execute(
-            "INSERT INTO transcription_sessions "
-            "(filename, speaker, user_id, total_segments, total_corrections, result_json) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
-            (
-                filename,
-                speaker,
-                user_id,
-                len(result.segments),
-                result.total_corrections,
-                json.dumps(result_dict),
-            ),
-        )
 
 
 # ===================================================================
@@ -396,6 +426,73 @@ def promotion_candidates(_user: dict = Depends(get_current_user)) -> dict:
             for c in candidates
         ],
     }
+
+
+@router.post("/corrections/promote")
+async def auto_promote(user: dict = Depends(get_current_user)) -> dict:
+    """
+    Trigger the self-learning promotion loop:
+    1. Fetch all corrections that reached Rule-of-5
+    2. Send each to Gemini 2.5 Flash for audit
+    3. If approved, promote to permanent lexicon rule
+    """
+    from app.core.gemini_auditor import audit_candidate
+
+    candidates = _logger.get_promotion_candidates()
+    if not candidates:
+        return {"promoted": 0, "rejected": 0, "results": [], "message": "No candidates ready for promotion"}
+
+    results = []
+    promoted = 0
+    rejected = 0
+
+    for cand in candidates:
+        audit = await audit_candidate(
+            original=cand.original_phrase,
+            corrected=cand.corrected_phrase,
+            source=cand.source,
+            occurrences=cand.occurrences,
+        )
+
+        if audit.approved:
+            # Promote: add to permanent lexicon
+            LexiconChecker.add_rule(
+                wrong_phrase=cand.original_phrase,
+                correct_phrase=cand.corrected_phrase,
+                context_hint=f"Auto-promoted from {cand.source} (seen {cand.occurrences}x)",
+            )
+            _logger.mark_promoted(cand.original_phrase, cand.corrected_phrase)
+            promoted += 1
+        else:
+            rejected += 1
+
+        results.append({
+            "original": audit.original,
+            "corrected": audit.corrected,
+            "approved": audit.approved,
+            "reason": audit.reason,
+        })
+
+    return {
+        "promoted": promoted,
+        "rejected": rejected,
+        "results": results,
+    }
+
+
+@router.get("/corrections/log")
+def correction_log(_user: dict = Depends(get_current_user)) -> dict:
+    """Return the full correction log for visibility."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT original_phrase, corrected_phrase, source, occurrences, "
+            "promoted, last_seen_at "
+            "FROM correction_log "
+            "ORDER BY occurrences DESC "
+            "LIMIT 100"
+        )
+        rows = cur.fetchall()
+    return {"entries": [dict(r) for r in rows]}
 
 
 # ===================================================================

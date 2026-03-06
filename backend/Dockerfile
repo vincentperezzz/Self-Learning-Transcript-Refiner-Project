@@ -7,8 +7,10 @@ ENV PYTHONIOENCODING=utf-8
 WORKDIR /app
 
 # Install dependencies first for layer caching
+# Use CPU-only PyTorch to keep image small (~150MB vs ~2GB with CUDA)
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
