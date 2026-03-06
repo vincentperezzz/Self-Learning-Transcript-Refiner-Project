@@ -16,19 +16,19 @@ def seed_lexicon() -> int:
     rules = [
         # ── Original golden rules ──
         # Whisper error -> Correct phrase, context_hint, anchor_mode
-        ("over-the-recorded line", "over the recorded line", "hyphenation error", "collections"),
-        ("Tamahuba", "tama ho ba", "greeting misheard", None),
-        ("Asti Madrid", "SP Madrid", "law firm name misheard", "collections"),
-        ("accredited service provided in", "accredited service provider ni", "role description", "collections"),
+        ("over-the-recorded line", "over the recorded line", "hyphenation error", "consent_to_record"),
+        ("Tamahuba", "tama ho ba", "greeting misheard", "greeting"),
+        ("Asti Madrid", "SP Madrid", "law firm name misheard", "introduction"),
+        ("accredited service provided in", "accredited service provider ni", "role description", "introduction"),
         ("Anna Dixman", "Anna De Guzman", "agent name misheard", None),
         ("Ana D. Guzman", "Ana de Guzman", "agent name variant", None),
         ("Ana Deguzman", "Ana de Guzman", "agent name variant", None),
-        ("set up the minimum amount", "settle the minimum amount", "verb confusion", "banking"),
+        ("set up the minimum amount", "settle the minimum amount", "verb confusion", "account_status"),
         ("magaroon", "magkaroon", "spelling error", None),
-        ("may settle", "ma-settle", "word boundary", "banking"),
+        ("may settle", "ma-settle", "word boundary", "negotiation"),
         ("Be encouraged", "We encourage you", "phrasing error", None),
         ("Ms. Marina", "Ms. Marie", "name misheard", None),
-        ("record deadline", "recorded line", "phonetic confusion", "collections"),
+        ("record deadline", "recorded line", "phonetic confusion", "consent_to_record"),
         ("spm.spmadridlaw.com", "spm@spmadridlaw.com", "email @ misheard as dot", None),
         ("SPM at SPMadridLaw.com", "spm@spmadridlaw.com", "email dictation", None),
         ("SPM at SPMadridLaw dot com", "spm@spmadridlaw.com", "email dictation", None),
@@ -37,16 +37,16 @@ def seed_lexicon() -> int:
         # Double-word corrections (Whisper repetition artifacts)
         ("birth date", "birthdate", "Whisper word split", None),
         ("birthdate date", "birthdate", "Whisper repetition", None),
-        ("subject is subject", "subject", "Whisper repetition", "banking"),
-        ("masettle settle", "masettle", "Whisper repetition", "banking"),
+        ("subject is subject", "subject", "Whisper repetition", "account_status"),
+        ("masettle settle", "masettle", "Whisper repetition", "negotiation"),
         # Number / currency prefix normalization
-        ("P5,", "\u20b15,", "currency prefix", "banking"),
-        ("P10,", "\u20b110,", "currency prefix", "banking"),
-        ("P15,", "\u20b115,", "currency prefix", "banking"),
-        ("P20,", "\u20b120,", "currency prefix", "banking"),
-        ("P25,", "\u20b125,", "currency prefix", "banking"),
-        ("P30,", "\u20b130,", "currency prefix", "banking"),
-        ("P50,", "\u20b150,", "currency prefix", "banking"),
+        ("P5,", "\u20b15,", "currency prefix", None),
+        ("P10,", "\u20b110,", "currency prefix", None),
+        ("P15,", "\u20b115,", "currency prefix", None),
+        ("P20,", "\u20b120,", "currency prefix", None),
+        ("P25,", "\u20b125,", "currency prefix", None),
+        ("P30,", "\u20b130,", "currency prefix", None),
+        ("P50,", "\u20b150,", "currency prefix", None),
 
         # ── From RegEx Patterns CSV – Whisper misrecognitions ──
         # "best time" variants
@@ -66,7 +66,7 @@ def seed_lexicon() -> int:
         ("graphter", "good afternoon", "Whisper greeting error", None),
         ("grapher", "good afternoon", "Whisper greeting error", None),
         # Birthday/birthdate errors
-        ("birth tape", "birthdate", "Whisper error: birth tape → birthdate", "VERIFICATION"),
+        ("birth tape", "birthdate", "Whisper error: birth tape → birthdate", "verification"),
         # Department errors
         ("hire department", "higher department", "Whisper error: hire → higher", None),
         # Endorse/forward variants

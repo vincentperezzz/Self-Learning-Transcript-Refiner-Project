@@ -74,6 +74,7 @@ export interface SessionSummary {
 }
 
 export interface SessionDetail extends SessionSummary {
+  processing_stage?: string | null;
   result_json: RefinementResponse;
   error_message: string | null;
 }

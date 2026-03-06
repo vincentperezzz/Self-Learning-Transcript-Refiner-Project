@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS transcription_sessions (
     speaker           TEXT,
     user_id           INTEGER REFERENCES users(id),
     status            TEXT    NOT NULL DEFAULT 'processing',
+    processing_stage  TEXT    DEFAULT 'whisper',
     total_segments    INTEGER NOT NULL DEFAULT 0,
     total_corrections INTEGER NOT NULL DEFAULT 0,
     result_json       JSONB,
@@ -132,6 +133,19 @@ def init_db() -> None:
                     ALTER TABLE transcription_sessions
                         ADD COLUMN status TEXT NOT NULL DEFAULT 'completed',
                         ADD COLUMN error_message TEXT;
+                END IF;
+            END $$;
+        """)
+        # Migration: add processing_stage column
+        conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'transcription_sessions' AND column_name = 'processing_stage'
+                ) THEN
+                    ALTER TABLE transcription_sessions
+                        ADD COLUMN processing_stage TEXT DEFAULT 'whisper';
                 END IF;
             END $$;
         """)

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional
+from typing import Callable, Optional
 
 from app.core.correction_log import CorrectionLogger
 from app.core.gemini_corrector import GeminiCorrection, correct_transcript_sync
@@ -52,7 +52,7 @@ class CorrectionEngine:
     # Public
     # ------------------------------------------------------------------
 
-    def refine(self, request: RefinementRequest) -> RefinementResponse:
+    def refine(self, request: RefinementRequest, on_stage: Callable[[str], None] | None = None) -> RefinementResponse:
         """Run the full correction pipeline on a list of segments."""
 
         segments = request.segments
@@ -94,6 +94,8 @@ class CorrectionEngine:
                 break
 
         if needs_gemini:
+            if on_stage:
+                on_stage("gemini")
             gemini_input = [
                 {
                     "index": idx,
@@ -272,9 +274,21 @@ class CorrectionEngine:
         r'(?=\d)'          # followed by a digit
     )
 
+    # Regex: standalone comma-formatted amounts without any currency prefix
+    # Matches patterns like "34,847.72" or "6,828.13" (thousands with comma)
+    # but NOT preceded by ₱, P, $, or a letter
+    _BARE_AMOUNT_RE = re.compile(
+        r'(?<![₱P$a-zA-Z])'        # not preceded by currency or letter
+        r'(?<!\d)'                   # not preceded by another digit
+        r'(\d{1,3}(?:,\d{3})+\.\d{2})'  # comma-formatted: 1,000.00 or 34,847.72
+        r'(?!\d)'                    # not followed by another digit
+    )
+
     def _post_currency(self, text: str) -> tuple[str, list[CorrectionDetail]]:
-        """Normalize P5,000 / $5,000 → ₱5,000."""
+        """Normalize P5,000 / $5,000 → ₱5,000 and add ₱ to bare amounts."""
         details: list[CorrectionDetail] = []
+
+        # Pass 1: Replace P/$ prefix with ₱
         new_text = self._CURRENCY_RE.sub("₱", text)
         if new_text != text:
             details.append(
@@ -284,6 +298,19 @@ class CorrectionEngine:
                     source=CorrectionSource.LEXICON,
                 )
             )
+
+        # Pass 2: Prepend ₱ to bare comma-formatted amounts (Whisper dropped prefix)
+        text2 = self._BARE_AMOUNT_RE.sub(r"₱\1", new_text)
+        if text2 != new_text:
+            details.append(
+                CorrectionDetail(
+                    original="bare amount (no currency)",
+                    corrected="₱ prefix added",
+                    source=CorrectionSource.LEXICON,
+                )
+            )
+            new_text = text2
+
         return new_text, details
 
     # Regex: consecutive duplicate words (case-insensitive)

@@ -19,9 +19,23 @@ class CorrectionSource(str, Enum):
 
 
 class AnchorMode(str, Enum):
-    BANKING = "banking"
-    COLLECTIONS = "collections"
+    GREETING = "greeting"
+    INTRODUCTION = "introduction"
+    CONSENT_TO_RECORD = "consent_to_record"
     VERIFICATION = "verification"
+    ACCOUNT_STATUS = "account_status"
+    PROBING_RFD = "probing_rfd"
+    PROBING_SOF = "probing_sof"
+    NEGOTIATION = "negotiation"
+    BENEFITS = "benefits"
+    CONSEQUENCES = "consequences"
+    PTP_COMMITMENT = "ptp_commitment"
+    PAYMENT_CHANNEL = "payment_channel"
+    RECAP = "recap"
+    EMPATHY = "empathy"
+    OBJECTION_HANDLING = "objection_handling"
+    CLOSING = "closing"
+    THIRD_PARTY = "third_party"
     GENERAL = "general"
 
 
@@ -76,7 +90,7 @@ class RefinedSegment(BaseModel):
     anchor_mode: Optional[AnchorMode] = None
     low_confidence_words: list[FlaggedWord] = Field(
         default_factory=list,
-        description="Words below the confidence threshold (candidates for Layer 3 DistilBERT)",
+        description="Words below the confidence threshold (candidates for Layer 3 Gemini)",
     )
 
 

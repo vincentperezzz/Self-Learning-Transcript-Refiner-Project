@@ -43,94 +43,278 @@ class AnchorHit:
 # ---------------------------------------------------------------------------
 
 _DEFAULT_ANCHORS: list[dict] = [
-    # Banking / Account
+    # ── GREETING ──
     {
-        "pattern": r"credit\s*card\s*account",
-        "mode": AnchorMode.BANKING,
-        "label": "credit_card_account",
+        "pattern": r"(hello|good\s*(morning|afternoon|evening)|kamusta)",
+        "mode": AnchorMode.GREETING,
+        "label": "greeting",
     },
-    {
-        "pattern": r"past\s*due",
-        "mode": AnchorMode.BANKING,
-        "label": "past_due",
-    },
-    {
-        "pattern": r"minimum\s*amount\s*due",
-        "mode": AnchorMode.BANKING,
-        "label": "minimum_amount_due",
-    },
-    {
-        "pattern": r"total\s*amount\s*due",
-        "mode": AnchorMode.BANKING,
-        "label": "total_amount_due",
-    },
-    {
-        "pattern": r"subject\s*(for|to)\s*suspension",
-        "mode": AnchorMode.BANKING,
-        "label": "suspension_notice",
-    },
-    {
-        "pattern": r"(settle|settlement)\s*(of|the|your)?\s*(account|balance|amount)",
-        "mode": AnchorMode.BANKING,
-        "label": "settlement_request",
-    },
-    {
-        "pattern": r"online\s*banking",
-        "mode": AnchorMode.BANKING,
-        "label": "online_banking",
-    },
-    {
-        "pattern": r"account\s*number\s*(ending\s*in)?",
-        "mode": AnchorMode.BANKING,
-        "label": "account_number",
-    },
-    # Collections / Legal
+    # ── INTRODUCTION (agent identifies self/agency) ──
     {
         "pattern": r"(SP|Asti)\s*Madrid\s*(Law\s*Firm|and\s*Associates)",
-        "mode": AnchorMode.COLLECTIONS,
+        "mode": AnchorMode.INTRODUCTION,
         "label": "law_firm_intro",
     },
     {
+        "pattern": r"(this\s*is|ako\s*(si|po))\s*\w+.*from",
+        "mode": AnchorMode.INTRODUCTION,
+        "label": "agent_intro",
+    },
+    {
         "pattern": r"on\s*behalf\s*of\s*Future\s*Bank",
-        "mode": AnchorMode.COLLECTIONS,
+        "mode": AnchorMode.INTRODUCTION,
         "label": "on_behalf_bank",
     },
     {
         "pattern": r"accredited\s*service\s*provider",
-        "mode": AnchorMode.COLLECTIONS,
+        "mode": AnchorMode.INTRODUCTION,
         "label": "accredited_provider",
     },
+    # ── CONSENT TO RECORD ──
     {
         "pattern": r"over\s*the\s*recorded\s*line",
-        "mode": AnchorMode.COLLECTIONS,
+        "mode": AnchorMode.CONSENT_TO_RECORD,
         "label": "recorded_line",
     },
     {
-        "pattern": r"(remittance|source\s*of\s*funds)",
-        "mode": AnchorMode.COLLECTIONS,
-        "label": "source_of_funds",
+        "pattern": r"(line|call)\s*(will\s*be|is\s*being)\s*recorded",
+        "mode": AnchorMode.CONSENT_TO_RECORD,
+        "label": "consent_record",
     },
-    # Verification
+    # ── VERIFICATION ──
     {
-        "pattern": r"(verification\s*purposes|verify\s*your\s*birthday|dictate\s*your\s*birthdate)",
+        "pattern": r"(verification\s*purposes|verify\s*your\s*(birthday|identity)|dictate\s*your\s*birthdate)",
         "mode": AnchorMode.VERIFICATION,
         "label": "identity_verification",
     },
     {
-        "pattern": r"(birthdate|birthday)",
+        "pattern": r"(birthdate|birthday|tama\s*(ho|po)\s*ba)",
         "mode": AnchorMode.VERIFICATION,
         "label": "birthdate_check",
     },
-    # Note-taking / detail capture (pen and paper context)
     {
-        "pattern": r"(pen\s*and\s*paper|take\s*note|take\s*down|jot\s*down)",
-        "mode": AnchorMode.COLLECTIONS,
-        "label": "note_taking",
+        "pattern": r"thank\s*you\s*for\s*(the\s*)?(verification|confirmation)",
+        "mode": AnchorMode.VERIFICATION,
+        "label": "verification_confirmed",
+    },
+    # ── ACCOUNT STATUS ──
+    {
+        "pattern": r"credit\s*card\s*account",
+        "mode": AnchorMode.ACCOUNT_STATUS,
+        "label": "credit_card_account",
     },
     {
+        "pattern": r"past\s*due",
+        "mode": AnchorMode.ACCOUNT_STATUS,
+        "label": "past_due",
+    },
+    {
+        "pattern": r"(minimum|total)\s*amount\s*due",
+        "mode": AnchorMode.ACCOUNT_STATUS,
+        "label": "amount_due",
+    },
+    {
+        "pattern": r"outstanding\s*balance",
+        "mode": AnchorMode.ACCOUNT_STATUS,
+        "label": "outstanding_balance",
+    },
+    {
+        "pattern": r"subject\s*(for|to)\s*suspension",
+        "mode": AnchorMode.ACCOUNT_STATUS,
+        "label": "suspension_notice",
+    },
+    {
+        "pattern": r"daily\s*interest",
+        "mode": AnchorMode.ACCOUNT_STATUS,
+        "label": "daily_interest",
+    },
+    # ── PROBING: RFD (Reason for Delay/Delinquency) ──
+    {
+        "pattern": r"(reason|dahilan|bakit).*(delay|hindi.*settle|past\s*due|delinquent|unsettled|napabayaan)",
+        "mode": AnchorMode.PROBING_RFD,
+        "label": "rfd_probing",
+    },
+    {
+        "pattern": r"(ano|anong).*(nangyari|problem|issue).*(account|settle|delay|payment)",
+        "mode": AnchorMode.PROBING_RFD,
+        "label": "rfd_inquiry",
+    },
+    {
+        "pattern": r"reason\s*for\s*(the\s*)?(delay|non[- ]?payment|broken\s*promise)",
+        "mode": AnchorMode.PROBING_RFD,
+        "label": "rfd_english",
+    },
+    # ── PROBING: SOF/SOI (Source of Funds/Income) ──
+    {
+        "pattern": r"source\s*of\s*(funds|income)",
+        "mode": AnchorMode.PROBING_SOF,
+        "label": "source_of_funds",
+    },
+    {
+        "pattern": r"(remittance|allotment|salary|sweldo|sahod|trabaho|employed|negosyo|business)",
+        "mode": AnchorMode.PROBING_SOF,
+        "label": "income_source",
+    },
+    {
+        "pattern": r"capacity\s*to\s*pay",
+        "mode": AnchorMode.PROBING_SOF,
+        "label": "capacity_to_pay",
+    },
+    # ── NEGOTIATION ──
+    {
+        "pattern": r"(settle|settlement|mag-?settle|ma-?settle|i-?settle)\s*(of|the|your|ng|sa)?\s*(account|balance|amount)?",
+        "mode": AnchorMode.NEGOTIATION,
+        "label": "settlement_request",
+    },
+    {
+        "pattern": r"(pay\s*in\s*full|full\s*payment|PIF)\s*(today|tomorrow|ngayon|bukas)?",
+        "mode": AnchorMode.NEGOTIATION,
+        "label": "pif_offer",
+    },
+    {
+        "pattern": r"partial\s*(payment|amount|settle)",
+        "mode": AnchorMode.NEGOTIATION,
+        "label": "partial_payment",
+    },
+    {
+        "pattern": r"(magawan|gawan)\s*(ng|ito)\s*paraan",
+        "mode": AnchorMode.NEGOTIATION,
+        "label": "find_solution",
+    },
+    {
+        "pattern": r"(makakapag-?settle|masettle|mababayaran|bayaran)",
+        "mode": AnchorMode.NEGOTIATION,
+        "label": "can_you_settle",
+    },
+    {
+        "pattern": r"(discount|amnesty|waiver|promo|installment|restructure)",
+        "mode": AnchorMode.NEGOTIATION,
+        "label": "special_offer",
+    },
+    # ── BENEFITS ──
+    {
+        "pattern": r"(good\s*standing|maintain.*account|active.*account|keep.*account.*active)",
+        "mode": AnchorMode.BENEFITS,
+        "label": "account_benefit",
+    },
+    {
+        "pattern": r"(credit\s*score|avoid.*impact|maiwasan.*impact)",
+        "mode": AnchorMode.BENEFITS,
+        "label": "credit_benefit",
+    },
+    # ── CONSEQUENCES ──
+    {
+        "pattern": r"(suspension|ma-?suspend|tuloy.*suspension|i-?suspend)",
+        "mode": AnchorMode.CONSEQUENCES,
+        "label": "suspension_warning",
+    },
+    {
+        "pattern": r"(legal\s*proceedings|case\s*filing|higher\s*department|further\s*collection|escalat)",
+        "mode": AnchorMode.CONSEQUENCES,
+        "label": "escalation_warning",
+    },
+    {
+        "pattern": r"(para\s*maiwasan|to\s*avoid|iwas)",
+        "mode": AnchorMode.CONSEQUENCES,
+        "label": "avoidance_framing",
+    },
+    # ── PTP / COMMITMENT TO PAY ──
+    {
+        "pattern": r"(commitment|promise)\s*to\s*pay",
+        "mode": AnchorMode.PTP_COMMITMENT,
+        "label": "ptp_commitment",
+    },
+    {
+        "pattern": r"(kailan|when).*((mag-?bayad|settle|payment)|(babayaran|i-?settle))",
+        "mode": AnchorMode.PTP_COMMITMENT,
+        "label": "ptp_when",
+    },
+    {
+        "pattern": r"(sige|okay|will\s*do|babayaran\s*ko|i.?ll\s*(pay|settle|see\s*what))",
+        "mode": AnchorMode.PTP_COMMITMENT,
+        "label": "borrower_agreement",
+    },
+    # ── PAYMENT CHANNEL ──
+    {
+        "pattern": r"(online\s*banking|mobile\s*banking|gcash|bayad\s*center|over\s*the\s*counter|branch)",
+        "mode": AnchorMode.PAYMENT_CHANNEL,
+        "label": "payment_channel",
+    },
+    {
+        "pattern": r"account\s*number\s*(ending\s*in)?",
+        "mode": AnchorMode.PAYMENT_CHANNEL,
+        "label": "account_number",
+    },
+    {
+        "pattern": r"(pakisend|send|email).*receipt",
+        "mode": AnchorMode.PAYMENT_CHANNEL,
+        "label": "proof_of_payment",
+    },
+    # ── RECAP ──
+    {
+        "pattern": r"(recap|summarize|i-?summarize|recap\s*natin|napag-?usapan)",
+        "mode": AnchorMode.RECAP,
+        "label": "recap_arrangement",
+    },
+    # ── EMPATHY ──
+    {
+        "pattern": r"(naiintindihan|naintindihan|understand|i\s*understand)\s*(ko\s*po|po|your\s*situation)?",
+        "mode": AnchorMode.EMPATHY,
+        "label": "empathy_statement",
+    },
+    {
+        "pattern": r"(mahirap|hirap|sorry\s*to\s*hear|I.?m\s*sorry)",
+        "mode": AnchorMode.EMPATHY,
+        "label": "empathy_difficulty",
+    },
+    # ── OBJECTION HANDLING ──
+    {
+        "pattern": r"(hindi\s*(ko|pa)\s*(kaya|kayang)|can.?t\s*afford|wala.*pera|wala.*pambayad)",
+        "mode": AnchorMode.OBJECTION_HANDLING,
+        "label": "cant_afford",
+    },
+    {
+        "pattern": r"(i-?hold\s*muna|hold\s*muna|hindi\s*pa\s*ngayon|later|mamaya|bukas)",
+        "mode": AnchorMode.OBJECTION_HANDLING,
+        "label": "delay_request",
+    },
+    # ── THIRD PARTY CONTACT ──
+    {
+        "pattern": r"(alternate|alternative|ibang)\s*(number|contact|phone)",
+        "mode": AnchorMode.THIRD_PARTY,
+        "label": "alternative_number",
+    },
+    {
+        "pattern": r"(relation|relasyon|kamag-?anak).*borrower",
+        "mode": AnchorMode.THIRD_PARTY,
+        "label": "relation_inquiry",
+    },
+    {
+        "pattern": r"best\s*time\s*(to\s*call|tawag)",
+        "mode": AnchorMode.THIRD_PARTY,
+        "label": "best_time_to_call",
+    },
+    # ── CLOSING ──
+    {
+        "pattern": r"(thank\s*you|salamat|maraming\s*salamat).*(good\s*day|nice\s*day|po)",
+        "mode": AnchorMode.CLOSING,
+        "label": "closing_greeting",
+    },
+    {
+        "pattern": r"(walang\s*anuman|ingat\s*po|anything\s*else|assist\s*with)",
+        "mode": AnchorMode.CLOSING,
+        "label": "closing_courtesy",
+    },
+    # ── Detail capture (email, contact) → falls under payment channel context ──
+    {
         "pattern": r"(email\s*address|contact\s*number|ticket\s*number|reference\s*number)",
-        "mode": AnchorMode.COLLECTIONS,
+        "mode": AnchorMode.PAYMENT_CHANNEL,
         "label": "detail_capture",
+    },
+    {
+        "pattern": r"(pen\s*and\s*paper|take\s*note|take\s*down|jot\s*down)",
+        "mode": AnchorMode.PAYMENT_CHANNEL,
+        "label": "note_taking",
     },
 ]
 
@@ -142,7 +326,7 @@ class SemanticAnchorManager:
     Usage:
         manager = SemanticAnchorManager()
         hits = manager.scan("...some transcript text...")
-        mode = manager.active_mode  # e.g. AnchorMode.BANKING
+        mode = manager.active_mode  # e.g. AnchorMode.ACCOUNT_STATUS
     """
 
     def __init__(self, custom_anchors: Optional[list[dict]] = None) -> None:
@@ -242,7 +426,7 @@ class SemanticAnchorManager:
     def get_context_bias(self) -> dict[str, float]:
         """
         Return a dict of label -> weight that downstream components
-        (N-Gram, DistilBERT) can use to bias their scoring.
+        (N-Gram, Gemini) can use to bias their scoring.
 
         Weight = (hits for this anchor / total hits).
         """

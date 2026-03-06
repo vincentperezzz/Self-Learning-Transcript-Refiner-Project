@@ -9,7 +9,7 @@ function fmt(seconds: number): string {
 const SOURCE_BADGE: Record<string, string> = {
   lexicon: "bg-emerald-700 text-emerald-100",
   ngram_anchor: "bg-sky-700 text-sky-100",
-  distilbert: "bg-violet-700 text-violet-100",
+  gemini: "bg-violet-700 text-violet-100",
 };
 
 function confColor(p: number): string {

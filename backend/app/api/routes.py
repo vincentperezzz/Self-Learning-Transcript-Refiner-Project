@@ -160,22 +160,35 @@ def _process_transcription_sync(
     """Background task (sync): transcribe via Groq, refine, update session."""
     import logging
     log = logging.getLogger(__name__)
+
+    def _set_stage(stage: str) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions SET processing_stage = %s WHERE id = %s",
+                (stage, session_id),
+            )
+
     try:
         log.info("BG task started for session %s", session_id)
+
+        # Stage 1: Whisper transcription
+        _set_stage("whisper")
         segments = transcribe_audio_sync(
             audio_bytes=audio_bytes,
             filename=filename,
             language=language,
         )
 
+        # Stage 2: Lexicon + N-Gram correction
+        _set_stage("lexicon")
         request = RefinementRequest(segments=segments, speaker=speaker)
-        result = _engine.refine(request)
+        result = _engine.refine(request, on_stage=_set_stage)
         result_dict = result.model_dump(mode="json")
 
         with get_db() as conn:
             conn.execute(
                 "UPDATE transcription_sessions "
-                "SET status = 'completed', total_segments = %s, "
+                "SET status = 'completed', processing_stage = NULL, total_segments = %s, "
                 "total_corrections = %s, result_json = %s "
                 "WHERE id = %s",
                 (
@@ -228,7 +241,7 @@ def list_sessions(user: dict = Depends(get_current_user)) -> dict:
 def get_session(session_key: str, user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT id, session_key, filename, speaker, status, total_segments, total_corrections, "
+            "SELECT id, session_key, filename, speaker, status, processing_stage, total_segments, total_corrections, "
             "result_json, error_message, created_at "
             "FROM transcription_sessions "
             "WHERE session_key = %s AND user_id = %s",

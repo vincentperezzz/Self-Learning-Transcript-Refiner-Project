@@ -317,7 +317,7 @@ function SourceBadge({ source }: { source: string }) {
   const colors: Record<string, string> = {
     lexicon: "bg-blue-900/50 text-blue-400",
     ngram_anchor: "bg-purple-900/50 text-purple-400",
-    distilbert: "bg-amber-900/50 text-amber-400",
+    gemini: "bg-violet-900/50 text-violet-400",
   };
   return (
     <span

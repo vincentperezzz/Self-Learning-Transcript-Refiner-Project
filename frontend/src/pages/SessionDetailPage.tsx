@@ -12,6 +12,48 @@ function fmt(seconds: number): string {
   return `${m}:${s.toString().padStart(2, "0")}.${ms}`;
 }
 
+const ANCHOR_BADGE: Record<string, string> = {
+  greeting: "bg-blue-900/50 text-blue-300",
+  introduction: "bg-indigo-900/50 text-indigo-300",
+  consent_to_record: "bg-slate-700/50 text-slate-300",
+  verification: "bg-cyan-900/50 text-cyan-300",
+  account_status: "bg-amber-900/50 text-amber-300",
+  probing_rfd: "bg-orange-900/50 text-orange-300",
+  probing_sof: "bg-orange-900/50 text-orange-300",
+  negotiation: "bg-yellow-900/50 text-yellow-300",
+  benefits: "bg-emerald-900/50 text-emerald-300",
+  consequences: "bg-red-900/50 text-red-300",
+  ptp_commitment: "bg-lime-900/50 text-lime-300",
+  payment_channel: "bg-teal-900/50 text-teal-300",
+  recap: "bg-violet-900/50 text-violet-300",
+  empathy: "bg-pink-900/50 text-pink-300",
+  objection_handling: "bg-rose-900/50 text-rose-300",
+  closing: "bg-gray-700/50 text-gray-300",
+  third_party: "bg-fuchsia-900/50 text-fuchsia-300",
+  general: "bg-gray-800/50 text-gray-400",
+};
+
+const ANCHOR_LABEL: Record<string, string> = {
+  greeting: "Greeting",
+  introduction: "Introduction",
+  consent_to_record: "Consent to Record",
+  verification: "Verification",
+  account_status: "Account Status",
+  probing_rfd: "Probing: RFD",
+  probing_sof: "Probing: SOF/SOI",
+  negotiation: "Negotiation",
+  benefits: "Benefits",
+  consequences: "Consequences",
+  ptp_commitment: "PTP / Commitment",
+  payment_channel: "Payment Channel",
+  recap: "Recap",
+  empathy: "Empathy",
+  objection_handling: "Objection Handling",
+  closing: "Closing",
+  third_party: "3rd Party Contact",
+  general: "General",
+};
+
 const SOURCE_BADGE: Record<string, string> = {
   lexicon: "bg-emerald-800/60 text-emerald-300",
   ngram_anchor: "bg-sky-800/60 text-sky-300",
@@ -113,16 +155,26 @@ export default function SessionDetailPage() {
             </p>
           </div>
           <div className="flex gap-3 text-xs text-gray-600">
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 bg-sky-500 rounded-full animate-pulse" />
-              Groq Whisper
-            </span>
-            <span className="text-gray-700">→</span>
-            <span>Lexicon</span>
-            <span className="text-gray-700">→</span>
-            <span>N-Gram</span>
-            <span className="text-gray-700">→</span>
-            <span>Gemini</span>
+            {["whisper", "lexicon", "ngram", "gemini"].map((stage, i, arr) => {
+              const labels: Record<string, string> = {
+                whisper: "Groq Whisper",
+                lexicon: "Lexicon",
+                ngram: "N-Gram",
+                gemini: "Gemini",
+              };
+              const isActive = session.processing_stage === stage;
+              return (
+                <span key={stage} className="flex items-center gap-1.5">
+                  {isActive && (
+                    <span className="h-2 w-2 bg-sky-500 rounded-full animate-pulse" />
+                  )}
+                  <span className={isActive ? "text-sky-400" : ""}>{labels[stage]}</span>
+                  {i < arr.length - 1 && (
+                    <span className="text-gray-700 ml-1.5">→</span>
+                  )}
+                </span>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -296,8 +348,10 @@ function SegmentRow({
           {fmt(seg.start)} – {fmt(seg.end)}
         </span>
         {seg.anchor_mode && (
-          <span className="px-2 py-0.5 rounded bg-gray-700/60 uppercase tracking-wide text-[10px]">
-            {seg.anchor_mode}
+          <span className={`px-2 py-0.5 rounded tracking-wide text-[10px] font-medium ${
+            ANCHOR_BADGE[seg.anchor_mode] ?? "bg-gray-700/50 text-gray-400"
+          }`}>
+            {ANCHOR_LABEL[seg.anchor_mode] ?? seg.anchor_mode}
           </span>
         )}
         {changed && (
