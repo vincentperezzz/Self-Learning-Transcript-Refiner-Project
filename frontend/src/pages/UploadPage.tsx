@@ -79,7 +79,6 @@ export default function UploadPage() {
     }
   }
 
-  const pendingCount = items.filter((it) => it.status === "pending").length;
   const doneCount = items.filter((it) => it.status === "done").length;
 
   return (
