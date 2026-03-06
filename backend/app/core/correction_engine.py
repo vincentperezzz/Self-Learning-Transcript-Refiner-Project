@@ -269,6 +269,8 @@ class CorrectionEngine:
                         confidence_delta=cand.confidence,
                     )
                 )
+                # Auto-add as probationary lexicon rule
+                self._auto_add_ngram_rule(orig_phrase, sugg_phrase)
         return text, details
 
     def _auto_add_lexicon_rule(self, gc: GeminiCorrection) -> None:
@@ -283,6 +285,19 @@ class CorrectionEngine:
                 )
         except Exception as e:
             logger.warning("Failed to auto-add lexicon rule '%s': %s", gc.original, e)
+
+    def _auto_add_ngram_rule(self, original: str, corrected: str) -> None:
+        """Add an N-Gram correction as a probationary lexicon rule."""
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
+                    "VALUES (%s, %s, %s, FALSE) "
+                    "ON CONFLICT (wrong_phrase) DO NOTHING",
+                    (original.lower(), corrected, "auto-promoted from N-Gram (probationary)"),
+                )
+        except Exception as e:
+            logger.warning("Failed to auto-add N-Gram rule '%s': %s", original, e)
 
     # ------------------------------------------------------------------
     # Post-processing

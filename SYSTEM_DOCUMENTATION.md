@@ -41,7 +41,7 @@ The lexicon is a database table of **known Whisper mistakes** and their correct 
 | recorded deadline | recorded line | COLLECTIONS |
 | Future Bank | Future Bank | (any) |
 
-**Self-learning:** When the correction log records the same fix 5+ times (the "Rule of 5"), the system flags it as a promotion candidate. After optional AI audit (Gemini 2.5 Flash), it can be promoted from a logged pattern to a permanent lexicon rule.
+**Self-learning:** Gemini corrections are auto-added to the lexicon as permanent rules. N-Gram corrections are auto-added as probationary rules (visible on the Lexicon page with an amber badge). Human "Correct with Gemini" overrides auto-delete conflicting probationary rules (reverse detection). The correction log tracks all corrections across sources for transparency.
 
 ---
 
@@ -179,7 +179,7 @@ When Whisper transcribes audio, it assigns a probability (0.0 to 1.0) to each wo
 | 70–89% | Yellow | Moderate confidence — word might be wrong |
 | < 70% | Red | Low confidence — Whisper is uncertain, likely a mistake |
 
-**Threshold:** Words below **80% confidence** (`LOW_CONFIDENCE_THRESHOLD = 0.85`) are flagged and displayed as low-confidence words on the segment card.
+**Threshold:** Words below **80% confidence** (`LOW_CONFIDENCE_THRESHOLD = 0.80`) are flagged and displayed as low-confidence words on the segment card.
 
 These flagged words are:
 - Displayed in the UI with their confidence percentage
@@ -192,29 +192,42 @@ These flagged words are:
 
 ## Self-Learning Loop
 
-The system gets smarter over time through two feedback mechanisms:
+The system gets smarter over time through four feedback mechanisms:
 
 ### Mechanism 1: Gemini Auto-Learning (Primary)
 
 Every time Gemini corrects a word/phrase:
 1. The correction is **applied** to the current transcript
 2. The correction is **logged** in `correction_log` with `source=gemini`
-3. A **new lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (permanent)
+3. A **permanent lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (`is_permanent=TRUE`)
 4. On the next transcription, **Layer 1 (Lexicon)** catches this pattern — no Gemini call needed
 
 This means the system learns from each session. Over time, the lexicon grows and Gemini handles only genuinely new, unseen errors.
 
-### Mechanism 2: Rule-of-5 Promotion (Supplementary)
+**Token Optimization:** Gemini receives only the rules that L1 actually applied to the current transcript (~50 tokens) instead of the entire lexicon. Duplicate corrections are filtered post-Gemini before applying.
 
-For corrections from L1/L2 sources:
-1. **Every correction is logged** in the `correction_log` table with: original text, corrected text, source, and timestamp
-2. **Rule of 5:** When the same correction appears 5+ times, it becomes a "promotion candidate"
-3. **Audit (optional):** Promotion candidates can be reviewed by Gemini 2.5 Flash to verify they're legitimate patterns
-4. **Promotion:** Verified candidates are promoted to permanent lexicon rules
+### Mechanism 2: N-Gram Probationary Promotion
 
-### Mechanism 3: N-Gram Growth
+When N-Gram (L2) makes a correction:
+1. The correction is **applied** to the transcript and **logged** in `correction_log` with `source=ngram_anchor`
+2. A **probationary lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (`is_permanent=FALSE`)
+3. Probationary rules **work identically** to permanent rules — L1 catches them on future transcripts
+4. They are visually distinct on the Lexicon page (amber "Probationary" badge vs green "Permanent")
+5. Users can review and confirm/delete probationary rules at their leisure
 
-After every refinement, the corrected text is ingested back into the N-gram frequency table. This makes the system progressively better at recognizing valid 3-word sequences, reducing false N-gram replacements.
+**Why probationary?** N-Gram corrections are statistical (based on trigram frequency), not semantic. While the safety guards are strict (phonetic similarity, zero-frequency check, min frequency threshold), there's a small chance of false positives. Probationary status flags them for optional human review.
+
+### Mechanism 3: Reverse Detection (Self-Correcting)
+
+If a user corrects a segment via the "Correct with Gemini" button and the correction **overrides** a probationary N-Gram rule:
+1. Any probationary lexicon rule whose `correct_phrase` matches the word the user says is wrong gets **automatically deleted**
+2. The user's correction is added as a **permanent** lexicon rule (`is_permanent=TRUE`)
+3. The system learns from its mistakes — bad N-Gram promotions are self-cleaning
+
+**Example flow:**
+- N-Gram promotes: `"recorded deadline"` → `"recorded line"` (probationary)
+- User clicks "Correct with Gemini" and says `"line"` should actually be `"deadline"` in this context
+- System deletes the probationary rule and adds a permanent rule: `"recorded line"` → `"recorded deadline"`
 
 ### Mechanism 4: Human-Guided Gemini Correction
 
@@ -225,9 +238,21 @@ Users can manually correct individual segments using the "Correct with Gemini" b
 3. Gemini returns the corrected text and a list of changes
 4. The correction is:
    - **Applied** to the session result in the database
-   - **Auto-added to the lexicon** with context hint `"human-guided via Gemini"`
+   - **Auto-added to the lexicon** as a permanent rule with context hint `"human-guided Gemini correction"`
+   - Any conflicting probationary rules are **auto-deleted** (reverse detection)
    - **Logged** in `correction_log` with `source=gemini`
 5. Future transcriptions will catch the same pattern via Layer 1 (Lexicon)
+
+### Mechanism 5: N-Gram Growth
+
+After every refinement, the corrected text is ingested back into the N-gram frequency table. This makes the system progressively better at recognizing valid 3-word sequences, reducing false N-gram replacements.
+
+### Lexicon Rule Types
+
+| Type | `is_permanent` | Source | Badge Color | Behavior |
+|---|---|---|---|---|
+| **Permanent** | `TRUE` | Human-added, Gemini auto-learn, Gemini human-guided | Green | Always applied, curated |
+| **Probationary** | `FALSE` | N-Gram auto-promote | Amber | Applied by L1, flagged for review, auto-removed on human override |
 
 ### Occurrence Tracking
 
@@ -275,21 +300,25 @@ Each segment in the corrections view has a gradient violet→indigo button with 
 - **Full Results** (purple button): Timestamped text plus correction annotations showing what was changed, by which layer, and the original text
 
 ### Lexicon Page
-View, add, edit, and delete permanent lexicon rules. Each rule has: wrong phrase, correct phrase, optional context hint, and optional anchor mode. Search box filters rules in real-time.
+View, add, edit, and delete lexicon rules. Each rule has: wrong phrase, correct phrase, optional context hint, and optional anchor mode. Search box filters rules in real-time.
+
+Rules show a **Status** badge:
+- **Permanent** (green) — human-added, Gemini auto-learned, or human-guided corrections
+- **Probationary** (amber) — auto-promoted from N-Gram analysis, subject to review and reverse detection
 
 ### N-Gram Page
 Browse the trigram frequency database with search, pagination, and frequency bar visualization. Shows all stored 3-word sequences sorted by frequency (highest first). Each row displays word1, word2, word3, frequency count, and a proportional bar chart.
 
 ### Self-Learning Page
-Three tabs: **Candidates**, **Log**, and **Results**.
+Two tabs: **Candidates** and **Log**.
+
+The **Candidates** tab shows corrections that have reached 5+ occurrences. These are tracked for visibility — Gemini corrections auto-add to the lexicon immediately, and N-Gram corrections auto-promote as probationary rules.
 
 The **Log** tab includes source filter cards showing counts by correction source:
 - **All** — total corrections
 - **Lexicon** — corrections from permanent rules (blue badge)
 - **N-Gram** — corrections from trigram analysis (purple badge)
 - **Gemini** — corrections from AI teacher (violet badge)
-
-Click a filter card to show only corrections from that source.
 
 ### Account Page
 Change password and manage user accounts (admin only).

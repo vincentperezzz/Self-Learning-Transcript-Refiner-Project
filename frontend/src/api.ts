@@ -244,6 +244,18 @@ export function listNgrams(search = "", limit = 200, offset = 0) {
   return request<{ total: number; ngrams: NGramEntry[] }>(`/ngram?${params}`);
 }
 
+export function deleteNgram(id: number) {
+  return request<{ status: string }>(`/ngram/${id}`, { method: "DELETE" });
+}
+
+export function updateNgramFrequency(id: number, frequency: number) {
+  return request<{ status: string }>(`/ngram/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ frequency }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Self-Learning / Corrections
 // ---------------------------------------------------------------------------

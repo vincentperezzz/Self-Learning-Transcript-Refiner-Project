@@ -154,9 +154,23 @@ export default function LexiconPage() {
                 className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm text-gray-200"
               >
                 <option value="">Any / None</option>
-                <option value="banking">Banking</option>
-                <option value="collections">Collections</option>
+                <option value="greeting">Greeting</option>
+                <option value="introduction">Introduction</option>
+                <option value="consent_to_record">Consent to Record</option>
                 <option value="verification">Verification</option>
+                <option value="account_status">Account Status</option>
+                <option value="probing_rfd">Probing: RFD</option>
+                <option value="probing_sof">Probing: SOF/SOI</option>
+                <option value="negotiation">Negotiation</option>
+                <option value="benefits">Benefits</option>
+                <option value="consequences">Consequences</option>
+                <option value="ptp_commitment">PTP / Commitment</option>
+                <option value="payment_channel">Payment Channel</option>
+                <option value="recap">Recap</option>
+                <option value="empathy">Empathy</option>
+                <option value="objection_handling">Objection Handling</option>
+                <option value="closing">Closing</option>
+                <option value="third_party">3rd Party Contact</option>
                 <option value="general">General</option>
               </select>
             </div>
@@ -190,6 +204,7 @@ export default function LexiconPage() {
               <th className="pb-2 pr-3">Wrong Phrase</th>
               <th className="pb-2 pr-3">Correct Phrase</th>
               <th className="pb-2 pr-3">Context</th>
+              <th className="pb-2 pr-3">Status</th>
               <th className="pb-2 pr-3">Mode</th>
               <th className="pb-2 w-20">Actions</th>
             </tr>
@@ -201,6 +216,17 @@ export default function LexiconPage() {
                 <td className="py-2 pr-3 text-emerald-400">{rule.correct_phrase}</td>
                 <td className="py-2 pr-3 text-gray-500">{rule.context_hint || "—"}</td>
                 <td className="py-2 pr-3">
+                  {rule.is_permanent ? (
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-900/50 text-xs text-emerald-400">
+                      Permanent
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded-full bg-amber-900/50 text-xs text-amber-400">
+                      Probationary
+                    </span>
+                  )}
+                </td>
+                <td className="py-2 pr-3">
                   {rule.anchor_mode ? (
                     <span className="px-1.5 py-0.5 rounded bg-gray-800 text-xs text-gray-300 uppercase">
                       {rule.anchor_mode}
@@ -210,18 +236,24 @@ export default function LexiconPage() {
                   )}
                 </td>
                 <td className="py-2">
-                  <div className="flex gap-2">
+                  <div className="flex gap-1">
                     <button
                       onClick={() => startEdit(rule)}
-                      className="text-xs text-sky-400 hover:text-sky-300"
+                      title="Edit rule"
+                      className="p-1 rounded hover:bg-sky-700/50 text-gray-400 hover:text-sky-300 transition-colors"
                     >
-                      Edit
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                      </svg>
                     </button>
                     <button
                       onClick={() => handleDelete(rule.id)}
-                      className="text-xs text-gray-500 hover:text-red-400"
+                      title="Delete rule"
+                      className="p-1 rounded hover:bg-red-700/50 text-gray-400 hover:text-red-400 transition-colors"
                     >
-                      Del
+                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                      </svg>
                     </button>
                   </div>
                 </td>

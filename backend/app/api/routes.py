@@ -322,12 +322,24 @@ def correct_segment(
                     "corrected": corr,
                     "source": "gemini",
                 })
-                # Auto-add to lexicon for future matching
+                # Remove probationary N-Gram rules that produced the wrong word
+                try:
+                    with get_db() as conn:
+                        conn.execute(
+                            "DELETE FROM lexicon WHERE correct_phrase ILIKE %s "
+                            "AND is_permanent = FALSE",
+                            (orig,),
+                        )
+                except Exception:
+                    pass
+                # Auto-add to lexicon for future matching (permanent — human-validated)
                 try:
                     with get_db() as conn:
                         conn.execute(
                             "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
-                            "VALUES (%s, %s, %s, TRUE) ON CONFLICT (wrong_phrase) DO NOTHING",
+                            "VALUES (%s, %s, %s, TRUE) ON CONFLICT (wrong_phrase) DO UPDATE "
+                            "SET correct_phrase = EXCLUDED.correct_phrase, "
+                            "context_hint = EXCLUDED.context_hint, is_permanent = TRUE",
                             (orig.lower(), corr, "human-guided Gemini correction"),
                         )
                 except Exception:
@@ -549,6 +561,30 @@ def lookup_ngram(
 ) -> dict:
     freq = NGramAuditor.lookup_frequency(w1, w2, w3)
     return {"trigram": [w1, w2, w3], "frequency": freq}
+
+
+@router.delete("/ngram/{ngram_id}")
+def delete_ngram(ngram_id: int, _user: dict = Depends(get_current_user)) -> dict:
+    with get_db() as conn:
+        conn.execute("DELETE FROM ngram_frequency WHERE id = %s", (ngram_id,))
+    return {"status": "deleted"}
+
+
+@router.patch("/ngram/{ngram_id}")
+def update_ngram_frequency(
+    ngram_id: int,
+    payload: dict,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    freq = payload.get("frequency")
+    if freq is None or not isinstance(freq, int) or freq < 0:
+        raise HTTPException(status_code=422, detail="'frequency' must be a non-negative integer")
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE ngram_frequency SET frequency = %s WHERE id = %s",
+            (freq, ngram_id),
+        )
+    return {"status": "updated"}
 
 
 # ===================================================================
