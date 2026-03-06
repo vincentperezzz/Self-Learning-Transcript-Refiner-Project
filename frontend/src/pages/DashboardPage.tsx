@@ -3,6 +3,24 @@ import { useNavigate } from "react-router-dom";
 import { deleteSession, listSessions } from "../api";
 import type { SessionSummary } from "../types";
 
+function formatDuration(created: string, completed?: string | null): string {
+  if (!completed) return "—";
+  const ms = new Date(completed).getTime() - new Date(created).getTime();
+  if (ms < 1000) return "<1s";
+  const secs = Math.floor(ms / 1000);
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.floor(secs / 60);
+  const rem = secs % 60;
+  return `${mins}m ${rem}s`;
+}
+
+const STAGE_LABEL: Record<string, string> = {
+  whisper: "Whisper",
+  lexicon: "Lexicon",
+  ngram: "N-Gram",
+  gemini: "Gemini",
+};
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -11,7 +29,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadSessions();
-    // Always poll — covers returning from upload page
     pollRef.current = setInterval(() => {
       listSessions()
         .then((data) => {
@@ -74,11 +91,13 @@ export default function DashboardPage() {
         <div className="bg-gray-900/60 border border-gray-800 rounded-xl overflow-hidden">
           {/* Table header */}
           <div className="grid grid-cols-12 gap-2 px-5 py-3 text-[11px] uppercase tracking-wider text-gray-500 border-b border-gray-800">
-            <div className="col-span-4">File</div>
-            <div className="col-span-2">Speaker</div>
+            <div className="col-span-3">File</div>
+            <div className="col-span-1">Speaker</div>
+            <div className="col-span-2 text-center">Status</div>
             <div className="col-span-1 text-center">Segments</div>
             <div className="col-span-1 text-center">Fixes</div>
-            <div className="col-span-3">Date</div>
+            <div className="col-span-1 text-center">Duration</div>
+            <div className="col-span-2">Date</div>
             <div className="col-span-1"></div>
           </div>
 
@@ -90,10 +109,13 @@ export default function DashboardPage() {
                          hover:bg-gray-800/40 transition-colors cursor-pointer"
               onClick={() => navigate(`/sessions/${s.session_key}`)}
             >
-              <div className="col-span-4 text-sm text-gray-200 truncate font-medium">
+              {/* File */}
+              <div className="col-span-3 text-sm text-gray-200 truncate font-medium">
                 {s.filename}
               </div>
-              <div className="col-span-2 text-sm text-gray-400">
+
+              {/* Speaker */}
+              <div className="col-span-1 text-sm text-gray-400">
                 {s.speaker ? (
                   <span
                     className={`px-2 py-0.5 rounded text-xs ${
@@ -108,33 +130,56 @@ export default function DashboardPage() {
                   <span className="text-gray-600">—</span>
                 )}
               </div>
+
+              {/* Status */}
+              <div className="col-span-2 text-center">
+                {s.status === "processing" ? (
+                  <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-sky-900/40 text-sky-400">
+                    <span className="h-1.5 w-1.5 bg-sky-400 rounded-full animate-pulse" />
+                    {s.processing_stage ? STAGE_LABEL[s.processing_stage] || s.processing_stage : "Processing"}
+                  </span>
+                ) : s.status === "failed" ? (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-red-900/40 text-red-400">
+                    Failed
+                  </span>
+                ) : (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-900/40 text-emerald-400">
+                    Completed
+                  </span>
+                )}
+              </div>
+
+              {/* Segments */}
               <div className="col-span-1 text-center text-sm text-gray-400">
-                {s.status === "processing" ? (
-                  <span className="inline-flex items-center gap-1 text-xs text-sky-400">
-                    <span className="h-2 w-2 bg-sky-500 rounded-full animate-pulse" />
-                  </span>
-                ) : s.status === "failed" ? (
-                  <span className="text-xs text-red-400">✗</span>
-                ) : (
-                  s.total_segments
-                )}
+                {s.status === "completed" ? s.total_segments : "—"}
               </div>
+
+              {/* Fixes */}
               <div className="col-span-1 text-center">
-                {s.status === "processing" ? (
-                  <span className="text-xs text-sky-400 animate-pulse">Processing...</span>
-                ) : s.status === "failed" ? (
-                  <span className="text-xs text-red-400">Failed</span>
-                ) : s.total_corrections > 0 ? (
-                  <span className="text-sm text-emerald-400 font-medium">
-                    {s.total_corrections}
-                  </span>
+                {s.status === "completed" ? (
+                  s.total_corrections > 0 ? (
+                    <span className="text-sm text-emerald-400 font-medium">
+                      {s.total_corrections}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-gray-600">0</span>
+                  )
                 ) : (
-                  <span className="text-sm text-gray-600">0</span>
+                  <span className="text-gray-600">—</span>
                 )}
               </div>
-              <div className="col-span-3 text-xs text-gray-500">
+
+              {/* Duration */}
+              <div className="col-span-1 text-center text-xs text-gray-500 tabular-nums">
+                {formatDuration(s.created_at, s.completed_at)}
+              </div>
+
+              {/* Date */}
+              <div className="col-span-2 text-xs text-gray-500">
                 {new Date(s.created_at).toLocaleString()}
               </div>
+
+              {/* Delete */}
               <div className="col-span-1 text-right">
                 <button
                   onClick={(e) => {

@@ -229,7 +229,8 @@ def refine_transcript(
 def list_sessions(user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT id, session_key, filename, speaker, status, total_segments, total_corrections, created_at "
+            "SELECT id, session_key, filename, speaker, status, processing_stage, "
+            "total_segments, total_corrections, created_at, completed_at "
             "FROM transcription_sessions "
             "WHERE user_id = %s "
             "ORDER BY created_at DESC",

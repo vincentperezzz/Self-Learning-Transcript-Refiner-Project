@@ -68,9 +68,11 @@ export interface SessionSummary {
   filename: string;
   speaker: string | null;
   status: "processing" | "completed" | "failed";
+  processing_stage?: string | null;
   total_segments: number;
   total_corrections: number;
   created_at: string;
+  completed_at?: string | null;
 }
 
 export interface SessionDetail extends SessionSummary {
