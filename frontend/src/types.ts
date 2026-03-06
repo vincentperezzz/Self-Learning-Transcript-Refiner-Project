@@ -90,3 +90,12 @@ export interface LexiconRule {
   is_permanent: boolean;
   created_at: string;
 }
+
+// N-Gram
+export interface NGramEntry {
+  id: number;
+  word1: string;
+  word2: string;
+  word3: string;
+  frequency: number;
+}

@@ -489,6 +489,47 @@ def delete_lexicon_rule(
 # N-GRAM
 # ===================================================================
 
+@router.get("/ngram")
+def list_ngrams(
+    search: str = "",
+    limit: int = 200,
+    offset: int = 0,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Return top N-grams sorted by frequency descending."""
+    with get_db() as conn:
+        if search:
+            rows = conn.execute(
+                """SELECT id, word1, word2, word3, frequency
+                   FROM ngram_frequency
+                   WHERE word1 ILIKE %s OR word2 ILIKE %s OR word3 ILIKE %s
+                   ORDER BY frequency DESC
+                   LIMIT %s OFFSET %s""",
+                (f"%{search}%", f"%{search}%", f"%{search}%", limit, offset),
+            ).fetchall()
+            total = conn.execute(
+                """SELECT COUNT(*) AS cnt FROM ngram_frequency
+                   WHERE word1 ILIKE %s OR word2 ILIKE %s OR word3 ILIKE %s""",
+                (f"%{search}%", f"%{search}%", f"%{search}%"),
+            ).fetchone()["cnt"]
+        else:
+            rows = conn.execute(
+                """SELECT id, word1, word2, word3, frequency
+                   FROM ngram_frequency
+                   ORDER BY frequency DESC
+                   LIMIT %s OFFSET %s""",
+                (limit, offset),
+            ).fetchall()
+            total = conn.execute("SELECT COUNT(*) AS cnt FROM ngram_frequency").fetchone()["cnt"]
+    return {
+        "total": total,
+        "ngrams": [
+            {"id": r["id"], "word1": r["word1"], "word2": r["word2"], "word3": r["word3"], "frequency": r["frequency"]}
+            for r in rows
+        ],
+    }
+
+
 @router.post("/ngram/ingest")
 def ingest_ngrams(
     payload: dict,
@@ -540,6 +581,7 @@ async def auto_promote(user: dict = Depends(get_current_user)) -> dict:
     3. If approved, promote to permanent lexicon rule
     """
     from app.core.gemini_auditor import audit_candidate
+    import asyncio
 
     candidates = _logger.get_promotion_candidates()
     if not candidates:
@@ -549,7 +591,9 @@ async def auto_promote(user: dict = Depends(get_current_user)) -> dict:
     promoted = 0
     rejected = 0
 
-    for cand in candidates:
+    for i, cand in enumerate(candidates):
+        if i > 0:
+            await asyncio.sleep(4)  # rate-limit: 4s between Gemini calls (free tier: 15 RPM)
         audit = await audit_candidate(
             original=cand.original_phrase,
             corrected=cand.corrected_phrase,

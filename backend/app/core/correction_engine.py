@@ -61,6 +61,7 @@ class CorrectionEngine:
 
         # --- Pass 1: Lexicon + N-Gram + post-processing per segment ---
         all_flagged: list[dict] = []
+        applied_lexicon_rules: list[tuple[str, str]] = []
         for idx, seg in enumerate(segments):
             ctx_before = segments[idx - 1].text if idx > 0 else ""
             ctx_after = segments[idx + 1].text if idx < len(segments) - 1 else ""
@@ -72,6 +73,11 @@ class CorrectionEngine:
             refined, corrections = self._refine_segment(seg, seg_mode)
             total_corrections += len(corrections)
             refined_segments.append(refined)
+
+            # Track which lexicon rules were applied
+            for c in corrections:
+                if c.source == CorrectionSource.LEXICON:
+                    applied_lexicon_rules.append((c.original, c.corrected))
 
             # Collect low-confidence words for Gemini
             for fw in refined.low_confidence_words:
@@ -113,10 +119,17 @@ class CorrectionEngine:
             gemini_corrections = correct_transcript_sync(
                 segments=gemini_input,
                 low_confidence_words=all_flagged if all_flagged else None,
+                applied_rules=applied_lexicon_rules if applied_lexicon_rules else None,
             )
 
             # Apply Gemini corrections and auto-learn
+            # Build set of already-applied rules for duplicate filtering (Option E)
+            applied_set = set(applied_lexicon_rules)
             for gc in gemini_corrections:
+                # Skip if L1 already applied this exact correction
+                if (gc.original, gc.corrected) in applied_set:
+                    logger.debug("Skipping Gemini duplicate: '%s' → '%s'", gc.original, gc.corrected)
+                    continue
                 if 0 <= gc.segment_index < len(refined_segments):
                     rs = refined_segments[gc.segment_index]
                     # Apply correction to the refined text

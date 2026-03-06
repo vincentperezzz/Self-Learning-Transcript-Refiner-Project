@@ -185,8 +185,14 @@ async def audit_candidate(
             resp.raise_for_status()
             data = resp.json()
 
-        # Extract the text response
-        text = data["candidates"][0]["content"]["parts"][0]["text"]
+        # Extract the text response (skip "thinking" parts from Gemini 2.5)
+        parts = data["candidates"][0]["content"]["parts"]
+        text = ""
+        for part in reversed(parts):
+            if part.get("thought"):
+                continue
+            text = part.get("text", "")
+            break
         # Strip markdown code fences if present
         text = text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
 

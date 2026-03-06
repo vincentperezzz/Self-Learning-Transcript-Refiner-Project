@@ -74,10 +74,28 @@ This layer uses **trigram frequency analysis** — it looks at every 3-word sequ
 
 **What are Semantic Anchors?**
 
-Semantic Anchors detect the **topic/domain** of each segment using regex patterns:
-- "credit card account", "past due", "minimum amount due" → **BANKING** mode
-- "SP Madrid Law Firm", "accredited service provider" → **COLLECTIONS** mode
-- "verification purposes", "dictate your birthdate" → **VERIFICATION** mode
+Semantic Anchors detect the **intent/topic** of each segment using ~40 regex patterns across **18 intent-based modes**:
+
+| Mode | Example Triggers |
+|---|---|
+| Greeting | "good morning", "magandang umaga" |
+| Verification | "verification purposes", "dictate your birthdate" |
+| Account_Status | "current balance", "past due amount" |
+| Probing:RFD | "reason for delay", "bakit hindi settle" |
+| Probing:Dispute | "dispute", "hindi ako ang gumamit" |
+| Probing:Hardship | "nawalan ng trabaho", "financial difficulty" |
+| Probing:WTP | "willing to pay", "kailan kayo magbabayad" |
+| Probing:Promise | "promise to pay", "commitment" |
+| Negotiation | "minimum amount due", "restructure" |
+| Payment_Details | "reference number", "payment channel" |
+| Reminder | "payment reminder", "follow up" |
+| Disclosure:Legal | "legal action", "file a case" |
+| Disclosure:Credit | "credit standing", "credit bureau" |
+| Hold | "please hold", "sandali lang" |
+| Transfer | "transfer your call", "supervisor" |
+| Closing | "thank you for calling", "anything else" |
+| Callback | "call you back", "follow up call" |
+| General | fallback for unmatched segments |
 
 The detected mode is used to:
 - Filter lexicon rules to only apply domain-relevant corrections
@@ -136,7 +154,13 @@ DistilBERT was removed because it:
 After the 3 layers, two additional cleanup steps run:
 
 ### Currency Normalizer
-Converts `P5,000` or `$5,000` to `₱5,000` (Philippine Peso). This handles Whisper sometimes transcribing peso amounts with `P` or `$` prefix.
+Converts spoken numbers and peso amounts into `₱` format:
+
+1. **"X pesos and Y centavos"** → `₱X.YY` (e.g., "34,847 pesos and 72 centavos" → "₱34,847.72")
+2. **"X pesos"** (without centavos) → `₱X.00` (e.g., "5,000 pesos" → "₱5,000.00")
+3. **Redundant "centavos" removal** → `₱34,847.72 centavos` → `₱34,847.72` (the decimals already represent centavos)
+4. **Symbol normalization** → `P5,000` or `$5,000` → `₱5,000`
+5. **Bare amounts** → standalone comma-formatted amounts get `₱` prepended
 
 ### Double-Word Deduplication
 Removes accidental repeated words like "settle settle" → "settle". Whisper occasionally stutters on word boundaries.
@@ -155,7 +179,7 @@ When Whisper transcribes audio, it assigns a probability (0.0 to 1.0) to each wo
 | 70–89% | Yellow | Moderate confidence — word might be wrong |
 | < 70% | Red | Low confidence — Whisper is uncertain, likely a mistake |
 
-**Threshold:** Words below **90% confidence** (`LOW_CONFIDENCE_THRESHOLD = 0.90`) are flagged and displayed as low-confidence words on the segment card.
+**Threshold:** Words below **80% confidence** (`LOW_CONFIDENCE_THRESHOLD = 0.85`) are flagged and displayed as low-confidence words on the segment card.
 
 These flagged words are:
 - Displayed in the UI with their confidence percentage
@@ -192,6 +216,19 @@ For corrections from L1/L2 sources:
 
 After every refinement, the corrected text is ingested back into the N-gram frequency table. This makes the system progressively better at recognizing valid 3-word sequences, reducing false N-gram replacements.
 
+### Mechanism 4: Human-Guided Gemini Correction
+
+Users can manually correct individual segments using the "Correct with Gemini" button on the Session Detail page:
+
+1. User clicks the sparkle button on a segment and types a natural-language instruction
+2. The instruction + segment text are sent to Gemini 2.5 Flash via a dedicated prompt template
+3. Gemini returns the corrected text and a list of changes
+4. The correction is:
+   - **Applied** to the session result in the database
+   - **Auto-added to the lexicon** with context hint `"human-guided via Gemini"`
+   - **Logged** in `correction_log` with `source=gemini`
+5. Future transcriptions will catch the same pattern via Layer 1 (Lexicon)
+
 ### Occurrence Tracking
 
 All corrections (from any source) are logged with occurrence counts. This data helps assess:
@@ -210,18 +247,52 @@ Shows all past refinement sessions with filename, speaker role, segment count, c
 Drag-and-drop or click to upload audio files. Select the speaker role (agent or client). The system transcribes via Groq, corrects via the 3-layer pipeline, and saves the session.
 
 ### Session Detail Page
-Three view modes:
+
+**Processing Stage Indicator:**
+While a session is processing, a visual indicator shows the current pipeline stage:
+- **Whisper** → **Lexicon** → **N-Gram** → **Gemini**
+- Past stages show as **green dots**, the active stage pulses as a **blue dot**, and future stages are dimmed
+- A client-side elapsed timer ticks every second for smooth updates
+- Stages only move forward (never jump backward), with 1-second polling intervals
+
+**Processing Duration Badge:**
+Once processing completes, a sky-blue badge shows the total duration (e.g., "15s" or "1m 23s"), calculated from `created_at` to `completed_at`.
+
+**Three view modes:**
 - **Transcript Only:** Clean text, no timestamps or annotations
 - **With Timestamps:** Each segment prefixed with `[m:ss.d - m:ss.d]`
 - **With Corrections:** Full detail view showing original vs. refined text, correction badges with source labels, anchor mode tags, and low-confidence word indicators
 
-Three download formats:
+**"Correct with Gemini" Button:**
+Each segment in the corrections view has a gradient violet→indigo button with a sparkle icon. Clicking it opens a chat form where you can type a natural-language instruction (e.g., "The caller said 'ididikta' not 'ididictate'"). The instruction is sent to Gemini along with the segment text, and the correction is:
+- Applied to the session immediately
+- Auto-added to the lexicon for future transcriptions
+- Logged in the correction log with `source=gemini`
+
+**Three download formats:**
 - **Transcript** (green button): Plain text file
 - **Timestamps** (blue button): Each line prefixed with time range
 - **Full Results** (purple button): Timestamped text plus correction annotations showing what was changed, by which layer, and the original text
 
 ### Lexicon Page
-View, add, edit, and delete permanent lexicon rules. Each rule has: wrong phrase, correct phrase, optional context hint, and optional anchor mode.
+View, add, edit, and delete permanent lexicon rules. Each rule has: wrong phrase, correct phrase, optional context hint, and optional anchor mode. Search box filters rules in real-time.
+
+### N-Gram Page
+Browse the trigram frequency database with search, pagination, and frequency bar visualization. Shows all stored 3-word sequences sorted by frequency (highest first). Each row displays word1, word2, word3, frequency count, and a proportional bar chart.
+
+### Self-Learning Page
+Three tabs: **Candidates**, **Log**, and **Results**.
+
+The **Log** tab includes source filter cards showing counts by correction source:
+- **All** — total corrections
+- **Lexicon** — corrections from permanent rules (blue badge)
+- **N-Gram** — corrections from trigram analysis (purple badge)
+- **Gemini** — corrections from AI teacher (violet badge)
+
+Click a filter card to show only corrections from that source.
+
+### Account Page
+Change password and manage user accounts (admin only).
 
 ---
 
@@ -259,7 +330,10 @@ Groq Whisper API (whisper-large-v3-turbo)
     ▼
 ┌─────────────────────────────────────────┐
 │         Post-Processing                 │
-│  • Currency normalize (P/$→₱)           │
+│  • "X pesos and Y centavos" → ₱X.YY    │
+│  • "X pesos" → ₱X.00                   │
+│  • Strip redundant "centavos" after ₱   │
+│  • Currency symbol normalize (P/$→₱)    │
 │  • Double-word dedup                    │
 └─────────────────────────────────────────┘
     │
@@ -283,13 +357,53 @@ Refined Transcript + Correction Details
 
 ## Database Tables
 
-| Table | Purpose |
-|---|---|
-| `lexicon` | Permanent word/phrase correction rules (Table A) |
-| `ngram_frequency` | Trigram frequency counts for statistical analysis (Table B) |
-| `correction_log` | Every correction ever made, for self-learning |
-| `users` | Authentication accounts |
-| `transcription_sessions` | Saved refinement results with full JSON data |
+| Table | Purpose | Key Columns |
+|---|---|---|
+| `lexicon` | Permanent word/phrase correction rules (Table A) | wrong_phrase, correct_phrase, context_hint, anchor_mode, is_permanent |
+| `ngram_frequency` | Trigram frequency counts for statistical analysis (Table B) | word1, word2, word3, frequency |
+| `correction_log` | Every correction ever made, for self-learning | original_phrase, corrected_phrase, source, occurrences, promoted |
+| `users` | Authentication accounts | username, password_hash, role |
+| `transcription_sessions` | Saved refinement results with full JSON data | session_key, status, processing_stage, result_json, completed_at |
+
+## API Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/v1/auth/login` | Login with username/password, returns JWT |
+| GET | `/api/v1/auth/me` | Get current user info |
+| PUT | `/api/v1/auth/password` | Change password |
+| GET | `/api/v1/auth/users` | List all users (admin) |
+| POST | `/api/v1/auth/users` | Create user (admin) |
+| DELETE | `/api/v1/auth/users/{id}` | Delete user (admin) |
+| GET | `/api/v1/health` | Health check |
+| POST | `/api/v1/transcribe` | Upload audio, transcribe + refine |
+| POST | `/api/v1/refine` | Refine raw segments (manual) |
+| GET | `/api/v1/sessions` | List all sessions |
+| GET | `/api/v1/sessions/{key}` | Get session detail (includes processing_stage) |
+| DELETE | `/api/v1/sessions/{key}` | Delete session |
+| GET | `/api/v1/sessions/{key}/download` | Download session (transcript/timestamped/results) |
+| POST | `/api/v1/sessions/{key}/correct-segment` | Human-guided Gemini correction for a segment |
+| GET | `/api/v1/lexicon` | List all lexicon rules |
+| POST | `/api/v1/lexicon` | Add a lexicon rule |
+| PUT | `/api/v1/lexicon/{id}` | Update a lexicon rule |
+| DELETE | `/api/v1/lexicon/{id}` | Delete a lexicon rule |
+| GET | `/api/v1/ngram` | List N-grams (search, pagination) |
+| POST | `/api/v1/ngram/ingest` | Ingest trigrams from texts |
+| GET | `/api/v1/ngram/lookup` | Lookup single trigram frequency |
+| GET | `/api/v1/corrections/candidates` | Get Rule-of-5 promotion candidates |
+| POST | `/api/v1/corrections/promote` | Trigger auto-promotion with Gemini audit |
+| GET | `/api/v1/corrections/log` | Get full correction log |
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `LOW_CONFIDENCE_THRESHOLD` | `0.80` | Whisper words below this probability are flagged as low-confidence |
+| `CORRECTION_THRESHOLD` | `5` | Number of occurrences needed for Rule-of-5 promotion |
+| `GEMINI_API_KEY` | — | Google Gemini 2.5 Flash API key |
+| `GROQ_API_KEY` | — | Groq API key for Whisper transcription |
+| `DATABASE_URL` | `postgresql://phoenix:phoenix@localhost:5432/phoenix` | PostgreSQL connection |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis cache connection |
 
 ## Tech Stack
 

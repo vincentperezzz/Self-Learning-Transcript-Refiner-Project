@@ -108,7 +108,7 @@ def seed_lexicon() -> int:
                 INSERT INTO lexicon
                 (wrong_phrase, correct_phrase, context_hint, anchor_mode)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING
+                ON CONFLICT (wrong_phrase) DO NOTHING
                 """,
                 (wrong, correct, hint, mode),
             )

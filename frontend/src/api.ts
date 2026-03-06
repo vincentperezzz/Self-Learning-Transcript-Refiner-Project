@@ -1,6 +1,7 @@
 import type {
   HealthResponse,
   LexiconRule,
+  NGramEntry,
   RefinementResponse,
   SessionDetail,
   SessionSummary,
@@ -231,6 +232,16 @@ export function updateLexiconRule(
 
 export function deleteLexiconRule(id: number) {
   return request<{ status: string }>(`/lexicon/${id}`, { method: "DELETE" });
+}
+
+// ---------------------------------------------------------------------------
+// N-Gram
+// ---------------------------------------------------------------------------
+
+export function listNgrams(search = "", limit = 200, offset = 0) {
+  const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  if (search) params.set("search", search);
+  return request<{ total: number; ngrams: NGramEntry[] }>(`/ngram?${params}`);
 }
 
 // ---------------------------------------------------------------------------

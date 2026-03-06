@@ -161,8 +161,7 @@ mangled, financial terms, call-center script phrases, collection-specific termin
 - Words already correct even if informal
 - Grammar or style (only fix ASR transcription errors, not language quality)
 - Already-correct currency symbols like ₱
-- Words/phrases that are ALREADY in the EXISTING LEXICON (listed below) — \
-our system already handles those
+- Words/phrases that appear correct in context — our system handles deduplication
 
 ═══ IMPORTANT CONTEXT ═══
 - "ho/po" are Filipino politeness particles — do NOT change them
@@ -208,6 +207,7 @@ def _fetch_lexicon_rules() -> list[dict]:
 def correct_transcript_sync(
     segments: list[dict],
     low_confidence_words: list[dict] | None = None,
+    applied_rules: list[tuple[str, str]] | None = None,
 ) -> list[GeminiCorrection]:
     """
     Send the full transcript to Gemini for correction analysis.
@@ -215,6 +215,7 @@ def correct_transcript_sync(
     Args:
         segments: List of dicts with keys: index, text, start, end
         low_confidence_words: Optional list of {segment_index, word, probability}
+        applied_rules: Optional list of (original, corrected) tuples for rules already applied by L1
 
     Returns:
         List of GeminiCorrection objects
@@ -245,17 +246,16 @@ def correct_transcript_sync(
             + "\n".join(low_conf_lines)
         )
 
-    # Build existing lexicon section so Gemini avoids duplicating known rules
-    lexicon_rules = _fetch_lexicon_rules()
-    lexicon_text = ""
-    if lexicon_rules:
-        lexicon_lines = [f"  \"{r['wrong']}\" → \"{r['correct']}\"" for r in lexicon_rules]
-        lexicon_text = (
-            "\n\nEXISTING LEXICON (our system already corrects these — do NOT duplicate):\n"
-            + "\n".join(lexicon_lines)
-        )
+    user_message = f"TRANSCRIPT:\n{transcript_text}{low_conf_text}"
 
-    user_message = f"TRANSCRIPT:\n{transcript_text}{low_conf_text}{lexicon_text}"
+    # Include only rules already applied by L1 (not the full lexicon)
+    if applied_rules:
+        unique_rules = list(dict.fromkeys(applied_rules))  # deduplicate, preserve order
+        rules_lines = [f"  \"{orig}\" → \"{corr}\"" for orig, corr in unique_rules]
+        user_message += (
+            "\n\nALREADY CORRECTED BY OUR SYSTEM (do not re-suggest these):\n"
+            + "\n".join(rules_lines)
+        )
 
     payload = {
         "contents": [
