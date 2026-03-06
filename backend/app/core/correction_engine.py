@@ -81,6 +81,10 @@ class CorrectionEngine:
                     "probability": fw.probability,
                 })
 
+            # Signal ngram stage after first segment is processed
+            if idx == 0 and on_stage:
+                on_stage("ngram")
+
         # --- Pass 2: Gemini correction for remaining issues ---
         # Determine which segments need Gemini analysis:
         #   1) Segments with low-confidence words
@@ -186,6 +190,10 @@ class CorrectionEngine:
         # --- Post-processing: currency normalizer ---
         text, currency_corrections = self._post_currency(text)
         all_corrections.extend(currency_corrections)
+
+        # --- Post-processing: written-out peso amounts ---
+        text, pesos_corrections = self._post_pesos_text(text)
+        all_corrections.extend(pesos_corrections)
 
         # --- Post-processing: double-word deduplication ---
         text, dedup_corrections = self._post_dedup_words(text)
@@ -311,6 +319,52 @@ class CorrectionEngine:
             )
             new_text = text2
 
+        return new_text, details
+
+    # Regex: "X pesos and Y centavos" / "X pesos" → ₱X.YY
+    _PESOS_CENTAVOS_RE = re.compile(
+        r'(\d[\d,]*)\s+pesos?\s+and\s+(\d{1,2})\s+centavos?',
+        re.IGNORECASE,
+    )
+    _PESOS_ONLY_RE = re.compile(
+        r'(\d[\d,]*)\s+pesos?(?!\s+and\s+\d{1,2}\s+centavo)',
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _pesos_centavos_repl(m: re.Match) -> str:
+        whole = m.group(1)
+        cents = m.group(2).zfill(2)
+        return f"₱{whole}.{cents}"
+
+    @staticmethod
+    def _pesos_only_repl(m: re.Match) -> str:
+        whole = m.group(1)
+        return f"₱{whole}.00"
+
+    # Regex: redundant "centavos" after ₱ amount with decimals
+    _REDUNDANT_CENTAVOS_RE = re.compile(
+        r'(₱[\d,]+\.\d{2})\s+centavos?',
+        re.IGNORECASE,
+    )
+
+    def _post_pesos_text(self, text: str) -> tuple[str, list[CorrectionDetail]]:
+        """Convert written-out peso amounts to ₱ numeric format and remove redundant centavos."""
+        details: list[CorrectionDetail] = []
+        # Pass 1: "X pesos and Y centavos"
+        new_text = self._PESOS_CENTAVOS_RE.sub(self._pesos_centavos_repl, text)
+        # Pass 2: "X pesos" alone
+        new_text = self._PESOS_ONLY_RE.sub(self._pesos_only_repl, new_text)
+        # Pass 3: Remove redundant "centavos" after ₱X,XXX.XX
+        new_text = self._REDUNDANT_CENTAVOS_RE.sub(r'\1', new_text)
+        if new_text != text:
+            details.append(
+                CorrectionDetail(
+                    original="written-out peso amount",
+                    corrected="₱ numeric format",
+                    source=CorrectionSource.LEXICON,
+                )
+            )
         return new_text, details
 
     # Regex: consecutive duplicate words (case-insensitive)

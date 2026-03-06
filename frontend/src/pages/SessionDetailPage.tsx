@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getSession, downloadSession } from "../api";
+import { getSession, downloadSession, correctSegmentWithGemini } from "../api";
 import type { SessionDetail, RefinedSegment } from "../types";
 
 type ViewMode = "transcript" | "timestamped" | "results";
@@ -74,29 +74,47 @@ export default function SessionDetailPage() {
   const [view, setView] = useState<ViewMode>("timestamped");
   const [downloading, setDownloading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [pollCount, setPollCount] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef(Date.now());
+
+  // Forward-only stage tracking
+  const STAGES = ["whisper", "lexicon", "ngram", "gemini"] as const;
+  const [highestStageIdx, setHighestStageIdx] = useState(0);
 
   const loadSession = useCallback(() => {
     if (!key) return;
     getSession(key)
       .then((data) => {
         setSession(data);
-        setPollCount((c) => c + 1);
-        // Stop polling once processing is done
-        if (data.status !== "processing" && pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
+        // Update highest stage (forward-only)
+        if (data.processing_stage) {
+          const idx = STAGES.indexOf(data.processing_stage as typeof STAGES[number]);
+          if (idx >= 0) {
+            setHighestStageIdx((prev) => Math.max(prev, idx));
+          }
+        }
+        // Stop polling + timer once processing is done
+        if (data.status !== "processing") {
+          if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+          if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null; }
         }
       })
       .catch(() => setError("Session not found"));
   }, [key]);
 
   useEffect(() => {
+    startTimeRef.current = Date.now();
     loadSession();
-    // Start polling for processing sessions
-    pollRef.current = setInterval(loadSession, 3000);
+    // Poll every 1s for real-time stage updates
+    pollRef.current = setInterval(loadSession, 1000);
+    // Smooth elapsed timer — updates every second independently
+    elapsedRef.current = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (elapsedRef.current) clearInterval(elapsedRef.current);
     };
   }, [loadSession]);
 
@@ -150,25 +168,34 @@ export default function SessionDetailPage() {
               Transcribing with Whisper and refining through the 3-layer correction pipeline.
               This page will update automatically when complete.
             </p>
-            <p className="text-xs text-gray-600 tabular-nums">
-              Checking... ({Math.floor(pollCount * 3)}s elapsed)
+            <p className="text-xs text-gray-500 tabular-nums font-mono">
+              {elapsed >= 60
+                ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`
+                : `${elapsed}s elapsed`}
             </p>
           </div>
           <div className="flex gap-3 text-xs text-gray-600">
-            {["whisper", "lexicon", "ngram", "gemini"].map((stage, i, arr) => {
+            {STAGES.map((stage, i, arr) => {
               const labels: Record<string, string> = {
                 whisper: "Groq Whisper",
                 lexicon: "Lexicon",
                 ngram: "N-Gram",
                 gemini: "Gemini",
               };
-              const isActive = session.processing_stage === stage;
+              const isActive = i === highestStageIdx;
+              const isPast = i < highestStageIdx;
               return (
                 <span key={stage} className="flex items-center gap-1.5">
+                  {isPast && (
+                    <span className="h-2 w-2 bg-emerald-500 rounded-full" />
+                  )}
                   {isActive && (
                     <span className="h-2 w-2 bg-sky-500 rounded-full animate-pulse" />
                   )}
-                  <span className={isActive ? "text-sky-400" : ""}>{labels[stage]}</span>
+                  <span className={
+                    isActive ? "text-sky-400 font-medium" :
+                    isPast ? "text-emerald-400/70" : ""
+                  }>{labels[stage]}</span>
                   {i < arr.length - 1 && (
                     <span className="text-gray-700 ml-1.5">→</span>
                   )}
@@ -233,6 +260,18 @@ export default function SessionDetailPage() {
               {session.total_segments} segments &middot;{" "}
               {session.total_corrections} corrections ({correctedCount} segments
               changed)
+              {session.completed_at && (
+                <>
+                  {" "}&middot;{" "}
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-900/40 text-sky-400 text-[10px] font-medium">
+                    {(() => {
+                      const ms = new Date(session.completed_at).getTime() - new Date(session.created_at).getTime();
+                      const sec = Math.round(ms / 1000);
+                      return sec >= 60 ? `${Math.floor(sec / 60)}m ${sec % 60}s` : `${sec}s`;
+                    })()}
+                  </span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -297,7 +336,7 @@ export default function SessionDetailPage() {
       {/* Segments */}
       <div className="space-y-1">
         {segments.map((seg, i) => (
-          <SegmentRow key={i} seg={seg} view={view} />
+          <SegmentRow key={i} seg={seg} view={view} segIndex={i} sessionKey={key!} onCorrected={loadSession} />
         ))}
       </div>
     </div>
@@ -309,12 +348,39 @@ export default function SessionDetailPage() {
 function SegmentRow({
   seg,
   view,
+  segIndex,
+  sessionKey,
+  onCorrected,
 }: {
   seg: RefinedSegment;
   view: ViewMode;
+  segIndex: number;
+  sessionKey: string;
+  onCorrected: () => void;
 }) {
+  const [showChat, setShowChat] = useState(false);
+  const [instruction, setInstruction] = useState("");
+  const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState("");
+
   const hasFixes = seg.corrections.length > 0;
   const changed = seg.original_text !== seg.refined_text;
+
+  async function handleSendCorrection() {
+    if (!instruction.trim()) return;
+    setSending(true);
+    setChatError("");
+    try {
+      await correctSegmentWithGemini(sessionKey, segIndex, instruction.trim());
+      setInstruction("");
+      setShowChat(false);
+      onCorrected();
+    } catch (e: unknown) {
+      setChatError(e instanceof Error ? e.message : "Correction failed");
+    } finally {
+      setSending(false);
+    }
+  }
 
   if (view === "transcript") {
     return (
@@ -359,6 +425,15 @@ function SegmentRow({
             CORRECTED
           </span>
         )}
+        <button
+          onClick={() => setShowChat(!showChat)}
+          className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-md shadow-violet-900/30 transition-all hover:shadow-lg hover:shadow-violet-800/40 active:scale-95"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2L14.09 8.26L20 9.27L15.55 13.97L16.91 20L12 16.9L7.09 20L8.45 13.97L4 9.27L9.91 8.26L12 2Z" />
+          </svg>
+          {showChat ? "Cancel" : "Correct with Gemini"}
+        </button>
       </div>
 
       {/* Text */}
@@ -385,6 +460,34 @@ function SegmentRow({
         <p className="text-sm text-gray-200 leading-relaxed mb-2">
           {seg.refined_text}
         </p>
+      )}
+
+      {/* Gemini correction chat form */}
+      {showChat && (
+        <div className="mb-3 p-3 rounded-lg bg-gray-900/80 border border-violet-800/40 space-y-2">
+          <p className="text-[11px] text-gray-500">
+            Describe what needs to be corrected. Gemini will apply the fix and add it to the lexicon.
+          </p>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={instruction}
+              onChange={(e) => setInstruction(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && !sending && handleSendCorrection()}
+              placeholder='e.g. "3,293 pesos and 10 centavos" should be ₱3,293.10'
+              className="flex-1 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-violet-600"
+              disabled={sending}
+            />
+            <button
+              onClick={handleSendCorrection}
+              disabled={sending || !instruction.trim()}
+              className="px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
+            >
+              {sending ? "Sending..." : "Send"}
+            </button>
+          </div>
+          {chatError && <p className="text-xs text-red-400">{chatError}</p>}
+        </div>
       )}
 
       {/* Corrections */}

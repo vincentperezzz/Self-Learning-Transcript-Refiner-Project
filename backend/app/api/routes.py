@@ -25,11 +25,13 @@ from app.auth import (
 )
 from app.core.correction_engine import CorrectionEngine
 from app.core.correction_log import CorrectionLogger
+from app.core.gemini_corrector import correct_segment_with_instruction
 from app.core.lexicon import LexiconChecker
 from app.core.ngram_auditor import NGramAuditor
 from app.core.whisper_client import transcribe_audio_sync
 from app.database import get_db
 from app.models.schemas import (
+    CorrectionSource,
     LexiconRule,
     NGramEntry,
     RefinementRequest,
@@ -189,7 +191,7 @@ def _process_transcription_sync(
             conn.execute(
                 "UPDATE transcription_sessions "
                 "SET status = 'completed', processing_stage = NULL, total_segments = %s, "
-                "total_corrections = %s, result_json = %s "
+                "total_corrections = %s, result_json = %s, completed_at = now() "
                 "WHERE id = %s",
                 (
                     len(result.segments),
@@ -242,7 +244,7 @@ def get_session(session_key: str, user: dict = Depends(get_current_user)) -> dic
     with get_db() as conn:
         cur = conn.execute(
             "SELECT id, session_key, filename, speaker, status, processing_stage, total_segments, total_corrections, "
-            "result_json, error_message, created_at "
+            "result_json, error_message, created_at, completed_at "
             "FROM transcription_sessions "
             "WHERE session_key = %s AND user_id = %s",
             (session_key, user["id"]),
@@ -265,6 +267,92 @@ def delete_session(session_key: str, user: dict = Depends(get_current_user)) -> 
             (session_key, user["id"]),
         )
     return {"status": "deleted"}
+
+
+@router.post("/sessions/{session_key}/correct-segment")
+def correct_segment(
+    session_key: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Human-guided Gemini correction for a single segment.
+    Payload: { "segment_index": int, "instruction": str }
+    """
+    seg_idx = payload.get("segment_index")
+    instruction = payload.get("instruction", "").strip()
+    if seg_idx is None or not instruction:
+        raise HTTPException(status_code=422, detail="segment_index and instruction are required")
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT id, result_json FROM transcription_sessions "
+            "WHERE session_key = %s AND user_id = %s",
+            (session_key, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = row["result_json"]
+    if isinstance(result, str):
+        result = json.loads(result)
+
+    segments = result.get("segments", [])
+    if seg_idx < 0 or seg_idx >= len(segments):
+        raise HTTPException(status_code=422, detail="segment_index out of range")
+
+    seg = segments[seg_idx]
+    original_text = seg["refined_text"]
+
+    # Call Gemini with user instruction
+    gemini_result = correct_segment_with_instruction(original_text, instruction)
+    corrected_text = gemini_result.get("corrected_text", original_text)
+    changes = gemini_result.get("changes", [])
+
+    if corrected_text != original_text and changes:
+        # Update the segment
+        seg["refined_text"] = corrected_text
+        for change in changes:
+            orig = change.get("original", "")
+            corr = change.get("corrected", "")
+            if orig and corr:
+                seg.setdefault("corrections", []).append({
+                    "original": orig,
+                    "corrected": corr,
+                    "source": "gemini",
+                })
+                # Auto-add to lexicon for future matching
+                try:
+                    with get_db() as conn:
+                        conn.execute(
+                            "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
+                            "VALUES (%s, %s, %s, TRUE) ON CONFLICT (wrong_phrase) DO NOTHING",
+                            (orig.lower(), corr, "human-guided Gemini correction"),
+                        )
+                except Exception:
+                    pass
+                # Log the correction
+                _logger.log(orig, corr, CorrectionSource.GEMINI)
+
+        # Persist updated result_json
+        total_new = sum(1 for c in changes if c.get("original") and c.get("corrected"))
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions SET result_json = %s, "
+                "total_corrections = total_corrections + %s WHERE id = %s",
+                (json.dumps(result), total_new, row["id"]),
+            )
+
+        # Flush lexicon cache
+        from app.cache import cache_delete_pattern
+        cache_delete_pattern("lexicon:*")
+
+    return {
+        "corrected_text": corrected_text,
+        "changes": changes,
+        "segment_index": seg_idx,
+    }
 
 
 @router.get("/sessions/{session_key}/download")

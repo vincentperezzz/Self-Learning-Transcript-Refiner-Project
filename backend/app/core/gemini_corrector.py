@@ -328,3 +328,91 @@ def correct_transcript_sync(
     except Exception as e:
         logger.error("Gemini corrector error: %s", e, exc_info=True)
         return []
+
+
+# ---------------------------------------------------------------------------
+# Human-guided segment correction via Gemini
+# ---------------------------------------------------------------------------
+
+_HUMAN_CORRECT_PROMPT = """\
+You are a transcript corrector for a Philippine collection agency call center.
+
+The user spotted an error in the following transcript segment and is telling you \
+what needs to be fixed. Apply ONLY the correction the user describes. \
+Do NOT change anything else.
+
+SEGMENT TEXT:
+{segment_text}
+
+USER INSTRUCTION:
+{user_instruction}
+
+Respond with EXACTLY a JSON object:
+{{
+  "corrected_text": "<the full corrected segment text>",
+  "changes": [
+    {{"original": "<wrong phrase>", "corrected": "<correct phrase>"}}
+  ]
+}}
+
+If the user instruction is unclear or no change is needed, return:
+{{"corrected_text": "<original text unchanged>", "changes": []}}
+
+RESPOND WITH ONLY THE JSON OBJECT. No explanation, no markdown fencing."""
+
+
+def correct_segment_with_instruction(
+    segment_text: str,
+    user_instruction: str,
+) -> dict:
+    """
+    Send a single segment + human instruction to Gemini for targeted correction.
+
+    Returns dict with keys: corrected_text, changes (list of {original, corrected})
+    """
+    if not GEMINI_API_KEY:
+        logger.warning("GEMINI_API_KEY not set")
+        return {"corrected_text": segment_text, "changes": []}
+
+    prompt = _HUMAN_CORRECT_PROMPT.format(
+        segment_text=segment_text,
+        user_instruction=user_instruction,
+    )
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.1, "maxOutputTokens": 2048},
+    }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                f"{GEMINI_API_URL}?key={GEMINI_API_KEY}",
+                json=payload,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        text = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [{}])[0]
+            .get("text", "{}")
+            .strip()
+        )
+
+        if text.startswith("```"):
+            text = text.split("\n", 1)[-1]
+            if text.endswith("```"):
+                text = text[:-3].strip()
+
+        result = json.loads(text)
+        if not isinstance(result, dict) or "corrected_text" not in result:
+            logger.warning("Gemini human-correct returned unexpected format")
+            return {"corrected_text": segment_text, "changes": []}
+
+        return result
+
+    except Exception as e:
+        logger.error("Gemini human-correct error: %s", e, exc_info=True)
+        return {"corrected_text": segment_text, "changes": []}

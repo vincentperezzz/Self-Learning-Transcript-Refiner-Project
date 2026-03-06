@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS transcription_sessions (
     total_corrections INTEGER NOT NULL DEFAULT 0,
     result_json       JSONB,
     error_message     TEXT,
-    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at      TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_ngram_words ON ngram_frequency(word1, word2, word3);
@@ -146,6 +147,19 @@ def init_db() -> None:
                 ) THEN
                     ALTER TABLE transcription_sessions
                         ADD COLUMN processing_stage TEXT DEFAULT 'whisper';
+                END IF;
+            END $$;
+        """)
+        # Migration: add completed_at column
+        conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'transcription_sessions' AND column_name = 'completed_at'
+                ) THEN
+                    ALTER TABLE transcription_sessions
+                        ADD COLUMN completed_at TIMESTAMPTZ;
                 END IF;
             END $$;
         """)

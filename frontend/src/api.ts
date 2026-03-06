@@ -153,6 +153,22 @@ export function deleteSession(key: string) {
   return request<{ status: string }>(`/sessions/${key}`, { method: "DELETE" });
 }
 
+export function correctSegmentWithGemini(
+  key: string,
+  segmentIndex: number,
+  instruction: string,
+) {
+  return request<{
+    corrected_text: string;
+    changes: { original: string; corrected: string }[];
+    segment_index: number;
+  }>(`/sessions/${key}/correct-segment`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ segment_index: segmentIndex, instruction }),
+  });
+}
+
 export async function downloadSession(
   key: string,
   format: "transcript" | "timestamped" | "results",

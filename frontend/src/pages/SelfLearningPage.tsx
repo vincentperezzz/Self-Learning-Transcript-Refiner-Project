@@ -202,6 +202,8 @@ function CandidatesTab({ candidates }: { candidates: Candidate[] }) {
 }
 
 function LogTab({ entries }: { entries: LogEntry[] }) {
+  const [filter, setFilter] = useState<string>("all");
+
   if (entries.length === 0) {
     return (
       <div className="text-center py-12 text-gray-500">
@@ -210,21 +212,65 @@ function LogTab({ entries }: { entries: LogEntry[] }) {
     );
   }
 
+  const sourceCounts = entries.reduce<Record<string, number>>((acc, e) => {
+    acc[e.source] = (acc[e.source] || 0) + 1;
+    return acc;
+  }, {});
+
+  const filtered = filter === "all" ? entries : entries.filter((e) => e.source === filter);
+
   return (
-    <div className="bg-gray-900/60 border border-gray-700 rounded-xl overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
-            <th className="px-4 py-3 text-left">Original</th>
-            <th className="px-4 py-3 text-left">Corrected</th>
-            <th className="px-4 py-3 text-left">Source</th>
-            <th className="px-4 py-3 text-right">Count</th>
-            <th className="px-4 py-3 text-center">Status</th>
-            <th className="px-4 py-3 text-right">Last Seen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((e, i) => (
+    <div className="space-y-4">
+      {/* Source summary cards */}
+      <div className="flex gap-3">
+        <button
+          onClick={() => setFilter("all")}
+          className={`flex-1 rounded-lg border p-3 text-center transition-colors ${
+            filter === "all"
+              ? "bg-gray-700/60 border-gray-500"
+              : "bg-gray-900/40 border-gray-700 hover:border-gray-600"
+          }`}
+        >
+          <div className="text-2xl font-bold text-white">{entries.length}</div>
+          <div className="text-[10px] text-gray-400 mt-0.5">All Sources</div>
+        </button>
+        {[
+          { key: "lexicon", label: "Lexicon", color: "text-blue-400" },
+          { key: "ngram_anchor", label: "N-Gram", color: "text-purple-400" },
+          { key: "gemini", label: "Gemini", color: "text-violet-400" },
+        ].map((s) => (
+          <button
+            key={s.key}
+            onClick={() => setFilter(filter === s.key ? "all" : s.key)}
+            className={`flex-1 rounded-lg border p-3 text-center transition-colors ${
+              filter === s.key
+                ? "bg-gray-700/60 border-gray-500"
+                : "bg-gray-900/40 border-gray-700 hover:border-gray-600"
+            }`}
+          >
+            <div className={`text-2xl font-bold ${s.color}`}>
+              {sourceCounts[s.key] || 0}
+            </div>
+            <div className="text-[10px] text-gray-400 mt-0.5">{s.label}</div>
+          </button>
+        ))}
+      </div>
+
+      {/* Table */}
+      <div className="bg-gray-900/60 border border-gray-700 rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-700 text-gray-400 text-xs uppercase tracking-wider">
+              <th className="px-4 py-3 text-left">Original</th>
+              <th className="px-4 py-3 text-left">Corrected</th>
+              <th className="px-4 py-3 text-left">Source</th>
+              <th className="px-4 py-3 text-right">Count</th>
+              <th className="px-4 py-3 text-center">Status</th>
+              <th className="px-4 py-3 text-right">Last Seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((e, i) => (
             <tr
               key={i}
               className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
@@ -261,6 +307,7 @@ function LogTab({ entries }: { entries: LogEntry[] }) {
           ))}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }
