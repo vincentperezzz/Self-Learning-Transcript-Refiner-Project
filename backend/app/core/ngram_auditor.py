@@ -306,3 +306,45 @@ class NGramAuditor:
         for t in texts:
             total += NGramAuditor.ingest_text(t)
         return total
+
+    # ------------------------------------------------------------------
+    # Unknown word detection
+    # ------------------------------------------------------------------
+
+    MIN_WORD_LEN: int = 3  # skip 1-2 char tokens (particles like "na", "ng", "po")
+
+    def find_unknown_words(self, text: str) -> list[str]:
+        """
+        Check each word in *text* against the N-gram corpus.
+
+        A word is "unknown" if it never appears in any trigram position
+        (word1, word2, or word3) in the ngram_frequency table.
+
+        Filters:
+          - Skip tokens with length <= 2 (Filipino particles, articles)
+
+        Returns a list of unknown word strings (lowercased, deduplicated).
+        """
+        tokens = self.tokenize(text)
+        if not tokens:
+            return []
+
+        unique_words = list({t for t in tokens if len(t) >= self.MIN_WORD_LEN})
+        if not unique_words:
+            return []
+
+        with get_db() as conn:
+            cur = conn.execute(
+                """
+                SELECT DISTINCT t.word
+                FROM unnest(%(words)s::text[]) AS t(word)
+                WHERE EXISTS (
+                    SELECT 1 FROM ngram_frequency n
+                    WHERE n.word1 = t.word OR n.word2 = t.word OR n.word3 = t.word
+                )
+                """,
+                {"words": unique_words},
+            )
+            known_words = {row["word"] for row in cur.fetchall()}
+
+        return [w for w in unique_words if w not in known_words]

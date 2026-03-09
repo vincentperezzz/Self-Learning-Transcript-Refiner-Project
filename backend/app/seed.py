@@ -98,6 +98,8 @@ def seed_lexicon() -> int:
         # Amnesty errors
         ("amnesia promo", "amnesty promo", "Whisper error: amnesia → amnesty", None),
         ("amnesia program", "amnesty program", "Whisper error: amnesia → amnesty", None),
+        # Sino/Kino confusion
+        ("kino", "sino", "Whisper error: kino → sino (Filipino question word)", None),
     ]
 
     count = 0

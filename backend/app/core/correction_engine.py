@@ -61,6 +61,7 @@ class CorrectionEngine:
 
         # --- Pass 1: Lexicon + N-Gram + post-processing per segment ---
         all_flagged: list[dict] = []
+        all_unknown_words: list[dict] = []
         applied_lexicon_rules: list[tuple[str, str]] = []
         for idx, seg in enumerate(segments):
             ctx_before = segments[idx - 1].text if idx > 0 else ""
@@ -87,6 +88,14 @@ class CorrectionEngine:
                     "probability": fw.probability,
                 })
 
+            # Detect unknown words via N-gram corpus
+            unknown = self.ngram_auditor.find_unknown_words(refined.refined_text)
+            for w in unknown:
+                all_unknown_words.append({
+                    "segment_index": idx,
+                    "word": w,
+                })
+
             # Signal ngram stage after first segment is processed
             if idx == 0 and on_stage:
                 on_stage("ngram")
@@ -95,13 +104,15 @@ class CorrectionEngine:
         # Determine which segments need Gemini analysis:
         #   1) Segments with low-confidence words
         #   2) Segments where L1/L2 made no corrections (unknown patterns)
-        needs_gemini = False
-        for idx, rs in enumerate(refined_segments):
-            has_low_conf = len(rs.low_confidence_words) > 0
-            had_no_fixes = len(rs.corrections) == 0
-            if has_low_conf or had_no_fixes:
-                needs_gemini = True
-                break
+        #   3) Unknown words detected by N-gram corpus analysis
+        needs_gemini = len(all_unknown_words) > 0
+        if not needs_gemini:
+            for idx, rs in enumerate(refined_segments):
+                has_low_conf = len(rs.low_confidence_words) > 0
+                had_no_fixes = len(rs.corrections) == 0
+                if has_low_conf or had_no_fixes:
+                    needs_gemini = True
+                    break
 
         if needs_gemini:
             if on_stage:
@@ -120,6 +131,7 @@ class CorrectionEngine:
                 segments=gemini_input,
                 low_confidence_words=all_flagged if all_flagged else None,
                 applied_rules=applied_lexicon_rules if applied_lexicon_rules else None,
+                unknown_words=all_unknown_words if all_unknown_words else None,
             )
 
             # Apply Gemini corrections and auto-learn

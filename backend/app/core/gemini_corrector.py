@@ -208,6 +208,7 @@ def correct_transcript_sync(
     segments: list[dict],
     low_confidence_words: list[dict] | None = None,
     applied_rules: list[tuple[str, str]] | None = None,
+    unknown_words: list[dict] | None = None,
 ) -> list[GeminiCorrection]:
     """
     Send the full transcript to Gemini for correction analysis.
@@ -216,6 +217,7 @@ def correct_transcript_sync(
         segments: List of dicts with keys: index, text, start, end
         low_confidence_words: Optional list of {segment_index, word, probability}
         applied_rules: Optional list of (original, corrected) tuples for rules already applied by L1
+        unknown_words: Optional list of {segment_index, word} for words not found in the N-gram corpus
 
     Returns:
         List of GeminiCorrection objects
@@ -247,6 +249,16 @@ def correct_transcript_sync(
         )
 
     user_message = f"TRANSCRIPT:\n{transcript_text}{low_conf_text}"
+
+    # Include unknown words detected by N-gram corpus analysis
+    if unknown_words:
+        unk_lines = []
+        for w in unknown_words:
+            unk_lines.append(f"  Segment {w['segment_index']}: \"{w['word']}\"")
+        user_message += (
+            "\n\nUNKNOWN WORDS (not found in our N-gram corpus — likely transcription errors, pay extra attention):\n"
+            + "\n".join(unk_lines)
+        )
 
     # Include only rules already applied by L1 (not the full lexicon)
     if applied_rules:

@@ -72,6 +72,14 @@ This layer uses **trigram frequency analysis** — it looks at every 3-word sequ
      - Length ratio must be ≥ 0.6 (prevents "ni" → "provider" type errors)
    - **Confidence threshold:** The ratio `suggested_freq / (suggested_freq + orig_freq)` must be ≥ 0.97
 
+**Unknown Word Detection:**
+
+After L2 corrections, each segment's refined text is checked against the full N-gram corpus. A word is "unknown" if it never appears in any trigram position (word1, word2, or word3) in the `ngram_frequency` table. Words ≤ 2 characters are skipped (Filipino particles like "na", "ng", "po").
+
+Unknown words are **not corrected** by N-gram (since no alternative was found), but they are **flagged and forwarded to Gemini** as a hint. This bridges the gap between N-gram's statistical detection and Gemini's contextual understanding — N-gram spots the anomaly, Gemini provides the fix.
+
+Example: "mag-buyid" tokenizes to ["mag", "buyid"]. "buyid" appears in zero trigrams → flagged as unknown → Gemini receives it as a priority correction hint.
+
 **What are Semantic Anchors?**
 
 Semantic Anchors detect the **intent/topic** of each segment using ~40 regex patterns across **18 intent-based modes**:
@@ -115,6 +123,7 @@ This layer replaces the previous DistilBERT approach. Instead of blindly predict
 **When it triggers:**
 - Segments with **low-confidence words** (Whisper was uncertain) → always analyzed
 - Segments where **L1 + L2 made no corrections** → analyzed for unknown patterns the lexicon doesn't cover yet
+- **Unknown words detected by N-gram corpus analysis** → words not found in any trigram are flagged as likely transcription errors
 
 **How it works:**
 
@@ -123,6 +132,7 @@ This layer replaces the previous DistilBERT approach. Instead of blindly predict
 2. Gemini receives:
    - All segments with timestamps and the text after L1/L2 corrections
    - A list of low-confidence words flagged by Whisper
+   - A list of **unknown words** flagged by N-gram corpus analysis (words never seen in any trigram)
    - Instructions specific to Philippine call-center context (Tagalog code-switching, politeness particles like "ho/po", company names, financial terms)
 
 3. Gemini identifies remaining Whisper transcription errors and returns structured corrections
@@ -258,7 +268,18 @@ Users can manually correct individual segments using the "Correct with Gemini" b
 
 After every refinement, the corrected text is ingested back into the N-gram frequency table. This makes the system progressively better at recognizing valid 3-word sequences, reducing false N-gram replacements.
 
-### Mechanism 6: Auto-Promotion (Probationary → Permanent)
+### Mechanism 6: N-Gram Unknown Word Detection → Gemini Hints
+
+After L1+L2 corrections, each segment is scanned against the N-gram corpus. Words that never appear in any trigram position are flagged as "unknown" and forwarded to Gemini as priority correction hints. This bridges the gap between N-gram's statistical detection and Gemini's contextual understanding:
+
+- **N-gram** spots the anomaly (word never seen in any valid trigram)
+- **Gemini** provides the semantic fix (understands what the word should be in context)
+
+Guard: words ≤ 2 characters are skipped to avoid false-flagging Filipino particles.
+
+Once Gemini corrects the unknown word, the correction flows through the standard self-learning loop (auto-added to lexicon as probationary, ingested into N-gram after correction).
+
+### Mechanism 7: Auto-Promotion (Probationary → Permanent)
 
 After each transcription session, the system checks all probationary rules for auto-promotion eligibility:
 
@@ -390,10 +411,14 @@ Groq Whisper API (whisper-large-v3-turbo)
 │  • Trigram frequency from Table B       │                                  │
 │  • Phonetic similarity guard            │                                  │
 │  • Zero-freq check + min-freq threshold │                                  │
+│  • Unknown word detection (zero corpus) │                                  │
 └─────────────────────────────────────────┘                                  │
     │                      │                                                 │
-    │                      └──▶ Auto-add as PROBATIONARY ─────────────────────┤
-    ▼                           lexicon rule (is_permanent=FALSE)             │
+    │                      ├──▶ Auto-add as PROBATIONARY ─────────────────────┤
+    │                      │    lexicon rule (is_permanent=FALSE)             │
+    │                      │                                                 │
+    │                      └──▶ Unknown words flagged ──┐                    │
+    ▼                                                   │                    │
 ┌─────────────────────────────────────────┐                                  │
 │         Post-Processing                 │                                  │
 │  • "X pesos and Y centavos" → ₱X.YY    │                                  │
@@ -403,10 +428,11 @@ Groq Whisper API (whisper-large-v3-turbo)
     │                                                                        │
     ▼                                                                        │
 ┌─────────────────────────────────────────┐                                  │
-│   Layer 3: Gemini 2.5 Flash Teacher     │                                  │
+│   Layer 3: Gemini 2.5 Flash Teacher     │ ◄── unknown words as hints ──────┘
 │  • Analyzes full transcript (1 API call)│                                  │
 │  • Corrects remaining Whisper errors    │                                  │
 │  • Receives applied L1 rules as context │                                  │
+│  • Receives N-gram unknown word flags   │                                  │
 └─────────────────────────────────────────┘                                  │
     │                      │                                                 │
     │                      └──▶ Auto-add as PROBATIONARY ─────────────────────┘
