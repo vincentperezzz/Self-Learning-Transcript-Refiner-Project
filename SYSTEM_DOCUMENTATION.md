@@ -254,6 +254,25 @@ When N-Gram (L2) makes a correction:
 
 **N-gram handles novel variants automatically:** If Whisper invents a new mishearing ("minimum amount joo"), N-gram catches it because `(minimum, amount, joo)` has zero frequency and `(minimum, amount, due)` is the dominant alternative. Lexicon would need a new rule for each variant.
 
+**Why Gemini → Lexicon does NOT break N-gram's domain:**
+
+Gemini corrections are added to the lexicon as probationary rules, and this is intentionally different from the removed N-gram → Lexicon crossover. The distinction is *semantic confidence*:
+
+| Source | Where stored | Confidence type |
+|---|---|---|
+| **N-gram (L2)** | `ngram_frequency` only (via corrected text ingestion) | Statistical guess — context-dependent |
+| **Gemini (L3)** | `lexicon` (probationary) + `ngram_frequency` (via ingestion) | Semantic judgment — understands meaning |
+| **Human-guided Gemini** | `lexicon` (probationary) | Human-validated correction |
+
+- **N-gram → Lexicon** was removed because statistical guesses promoted to context-blind rules are dangerous. N-gram doesn't understand meaning — it only knows `(minimum, amount, dew)` has zero frequency.
+- **Gemini → Lexicon** is kept because semantic judgments promoted to rules are safe. When Gemini says `"minimum amount dew"` should be `"minimum amount due"`, it understands that "dew" makes no sense in a billing context. The exact phrase `"minimum amount dew"` IS always wrong — lexicon can safely catch it.
+
+The two systems learn in parallel, not in conflict:
+1. Gemini creates exact-phrase lexicon rules → catches **known** mishearings at L1 (fast, deterministic)
+2. Corrected text is ingested into N-gram → catches **novel** variants that no lexicon rule exists for yet
+
+N-gram's domain is preserved because it remains the early-warning system for new patterns. Lexicon only contains rules that have been semantically confirmed by Gemini or a human.
+
 ### Mechanism 3: Reverse Detection (Trust Erosion)
 
 When a user corrects a segment via the "Correct with Gemini" button, the system applies a **trust erosion** model to conflicting lexicon rules:
