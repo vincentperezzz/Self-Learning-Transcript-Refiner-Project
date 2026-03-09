@@ -59,13 +59,28 @@ class LexiconChecker:
         text: str,
         anchor_mode: Optional[AnchorMode] = None,
     ) -> tuple[str, list[LexiconMatch]]:
-        """Apply all matching lexicon rules and return (corrected_text, matches)."""
-        matches = self.check(text, anchor_mode)
+        """Apply lexicon rules sequentially — each rule runs against the
+        result of the previous, so chained corrections work correctly.
+        Rules are tried longest-first to give specific phrases priority."""
+        rules = self._load_rules(anchor_mode)
         corrected = text
-        for match in sorted(matches, key=lambda m: m.span[0], reverse=True):
-            start, end = match.span
-            corrected = corrected[:start] + match.correct_phrase + corrected[end:]
-        return corrected, matches
+        all_matches: list[LexiconMatch] = []
+
+        for rule in rules:
+            pattern = re.compile(re.escape(rule["wrong_phrase"]), re.IGNORECASE)
+            m = pattern.search(corrected)
+            if m:
+                corrected = corrected[:m.start()] + rule["correct_phrase"] + corrected[m.end():]
+                all_matches.append(
+                    LexiconMatch(
+                        wrong_phrase=rule["wrong_phrase"],
+                        correct_phrase=rule["correct_phrase"],
+                        anchor_mode=rule["anchor_mode"],
+                        span=m.span(),
+                    )
+                )
+
+        return corrected, all_matches
 
     # ------------------------------------------------------------------
     # DB access (with Redis cache)

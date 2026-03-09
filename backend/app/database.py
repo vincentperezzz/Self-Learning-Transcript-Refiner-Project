@@ -111,6 +111,17 @@ CREATE TABLE IF NOT EXISTS transcription_sessions (
     completed_at      TIMESTAMPTZ
 );
 
+-- Lexicon Blocklist (permanently banned correction pairs)
+CREATE TABLE IF NOT EXISTS lexicon_blocklist (
+    id              SERIAL PRIMARY KEY,
+    wrong_phrase    TEXT    NOT NULL,
+    correct_phrase  TEXT    NOT NULL,
+    reason          TEXT,
+    banned_by       TEXT    NOT NULL DEFAULT 'manual',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(wrong_phrase, correct_phrase)
+);
+
 CREATE INDEX IF NOT EXISTS idx_ngram_words ON ngram_frequency(word1, word2, word3);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lexicon_wrong ON lexicon(wrong_phrase);
 CREATE INDEX IF NOT EXISTS idx_correction_log_occ ON correction_log(occurrences);

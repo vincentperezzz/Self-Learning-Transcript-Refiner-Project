@@ -1,4 +1,5 @@
 import type {
+  BlocklistRule,
   HealthResponse,
   LexiconRule,
   NGramEntry,
@@ -230,8 +231,9 @@ export function updateLexiconRule(
   });
 }
 
-export function deleteLexiconRule(id: number) {
-  return request<{ status: string }>(`/lexicon/${id}`, { method: "DELETE" });
+export function deleteLexiconRule(id: number, reason = "") {
+  const params = reason ? `?reason=${encodeURIComponent(reason)}` : "";
+  return request<{ status: string }>(`/lexicon/${id}${params}`, { method: "DELETE" });
 }
 
 export function promoteLexiconRule(id: number) {
@@ -244,6 +246,31 @@ export function demoteLexiconRule(id: number) {
   return request<{ status: string; id: number }>(`/lexicon/${id}/demote`, {
     method: "PATCH",
   });
+}
+
+// ---------------------------------------------------------------------------
+// Blocklist (Banned Corrections)
+// ---------------------------------------------------------------------------
+
+export function listBlocklist(search = "") {
+  const params = search ? `?search=${encodeURIComponent(search)}` : "";
+  return request<{ rules: BlocklistRule[] }>(`/blocklist${params}`);
+}
+
+export function addBlocklistRule(payload: {
+  wrong_phrase: string;
+  correct_phrase: string;
+  reason?: string;
+}) {
+  return request<{ status: string }>("/blocklist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteBlocklistRule(id: number) {
+  return request<{ status: string }>(`/blocklist/${id}`, { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

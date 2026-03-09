@@ -24,6 +24,11 @@ def seed_lexicon() -> int:
         ("Ana D. Guzman", "Ana de Guzman", "agent name variant", None),
         ("Ana Deguzman", "Ana de Guzman", "agent name variant", None),
         ("set up the minimum amount", "settle the minimum amount", "verb confusion", "account_status"),
+        # "minimum amount due" — only correct specific misheard variants of "due"
+        ("minimum amount dew", "minimum amount due", "Whisper error: dew → due", "account_status"),
+        ("minimum amount do", "minimum amount due", "Whisper error: do → due", "account_status"),
+        ("minimum amount jew", "minimum amount due", "Whisper error: jew → due", "account_status"),
+        ("minimum amount doo", "minimum amount due", "Whisper error: doo → due", "account_status"),
         ("magaroon", "magkaroon", "spelling error", None),
         ("may settle", "ma-settle", "word boundary", "negotiation"),
         ("Be encouraged", "We encourage you", "phrasing error", None),

@@ -101,3 +101,13 @@ export interface NGramEntry {
   word3: string;
   frequency: number;
 }
+
+// Blocklist
+export interface BlocklistRule {
+  id: number;
+  wrong_phrase: string;
+  correct_phrase: string;
+  reason: string | null;
+  banned_by: string;
+  created_at: string;
+}

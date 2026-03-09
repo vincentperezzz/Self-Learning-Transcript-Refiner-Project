@@ -498,15 +498,101 @@ def update_lexicon_rule(
 
 
 @router.delete("/lexicon/{rule_id}")
-def delete_lexicon_rule(
+def ban_lexicon_rule(
     rule_id: int,
+    reason: str = Query("", description="Reason for banning"),
     _user: dict = Depends(get_current_user),
 ) -> dict:
+    """Delete a lexicon rule AND add it to the blocklist so it can never be re-learned."""
     with get_db() as conn:
+        # Fetch the rule first so we can blocklist it
+        cur = conn.execute(
+            "SELECT wrong_phrase, correct_phrase FROM lexicon WHERE id = %s",
+            (rule_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Rule not found")
+
+        # Add to blocklist
+        conn.execute(
+            "INSERT INTO lexicon_blocklist (wrong_phrase, correct_phrase, reason, banned_by) "
+            "VALUES (%s, %s, %s, 'manual') "
+            "ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING",
+            (row["wrong_phrase"], row["correct_phrase"], reason or None),
+        )
+
+        # Delete the rule
         conn.execute("DELETE FROM lexicon WHERE id = %s", (rule_id,))
+
     from app.cache import cache_delete_pattern
     cache_delete_pattern("lexicon:*")
-    return {"status": "deleted"}
+    return {"status": "banned", "wrong_phrase": row["wrong_phrase"], "correct_phrase": row["correct_phrase"]}
+
+
+# ===================================================================
+# BLOCKLIST
+# ===================================================================
+
+@router.get("/blocklist")
+def list_blocklist(
+    search: str = "",
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Return all blocklisted correction pairs."""
+    with get_db() as conn:
+        if search:
+            cur = conn.execute(
+                "SELECT id, wrong_phrase, correct_phrase, reason, banned_by, created_at "
+                "FROM lexicon_blocklist "
+                "WHERE wrong_phrase ILIKE %s OR correct_phrase ILIKE %s "
+                "ORDER BY created_at DESC",
+                (f"%{search}%", f"%{search}%"),
+            )
+        else:
+            cur = conn.execute(
+                "SELECT id, wrong_phrase, correct_phrase, reason, banned_by, created_at "
+                "FROM lexicon_blocklist ORDER BY created_at DESC"
+            )
+        rows = cur.fetchall()
+    return {"rules": [dict(r) for r in rows]}
+
+
+@router.post("/blocklist", status_code=201)
+def add_blocklist_rule(
+    payload: dict,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Manually add a correction pair to the blocklist."""
+    wrong = payload.get("wrong_phrase", "").strip().lower()
+    correct = payload.get("correct_phrase", "").strip()
+    reason = payload.get("reason", "")
+    if not wrong or not correct:
+        raise HTTPException(status_code=422, detail="wrong_phrase and correct_phrase required")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO lexicon_blocklist (wrong_phrase, correct_phrase, reason, banned_by) "
+            "VALUES (%s, %s, %s, 'manual') "
+            "ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING",
+            (wrong, correct, reason or None),
+        )
+    return {"status": "created", "wrong_phrase": wrong, "correct_phrase": correct}
+
+
+@router.delete("/blocklist/{blocklist_id}")
+def unban_blocklist_rule(
+    blocklist_id: int,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Remove a correction pair from the blocklist (unban)."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM lexicon_blocklist WHERE id = %s RETURNING id", (blocklist_id,)
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Blocklist entry not found")
+    return {"status": "unbanned"}
 
 
 @router.patch("/lexicon/{rule_id}/promote")

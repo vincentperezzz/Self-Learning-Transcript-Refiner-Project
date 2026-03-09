@@ -80,8 +80,10 @@ export default function LexiconPage() {
   }
 
   async function handleDelete(id: number) {
+    const reason = prompt("Reason for banning this rule (optional):");
+    if (reason === null) return; // user cancelled
     try {
-      await deleteLexiconRule(id);
+      await deleteLexiconRule(id, reason);
       setRules((prev) => prev.filter((r) => r.id !== id));
     } catch {}
   }
@@ -335,11 +337,11 @@ export default function LexiconPage() {
                     </button>
                     <button
                       onClick={() => handleDelete(rule.id)}
-                      title="Delete rule"
+                      title="Ban rule (delete + blocklist)"
                       className="p-1 rounded hover:bg-red-700/50 text-gray-400 hover:text-red-400 transition-colors"
                     >
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+                        <path fillRule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clipRule="evenodd" />
                       </svg>
                     </button>
                   </div>

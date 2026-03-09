@@ -48,6 +48,17 @@ class CorrectionEngine:
         self.lexicon = LexiconChecker()
         self.correction_logger = CorrectionLogger()
 
+    @staticmethod
+    def _is_blocklisted(wrong: str, correct: str) -> bool:
+        """Check if a correction pair is permanently banned."""
+        with get_db() as conn:
+            cur = conn.execute(
+                "SELECT 1 FROM lexicon_blocklist "
+                "WHERE LOWER(wrong_phrase) = LOWER(%s) AND LOWER(correct_phrase) = LOWER(%s)",
+                (wrong, correct),
+            )
+            return cur.fetchone() is not None
+
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
@@ -142,6 +153,10 @@ class CorrectionEngine:
                 if (gc.original, gc.corrected) in applied_set:
                     logger.debug("Skipping Gemini duplicate: '%s' → '%s'", gc.original, gc.corrected)
                     continue
+                # Gate 1: Skip if this correction pair is blocklisted
+                if self._is_blocklisted(gc.original, gc.corrected):
+                    logger.info("Blocked by blocklist: '%s' → '%s'", gc.original, gc.corrected)
+                    continue
                 if 0 <= gc.segment_index < len(refined_segments):
                     rs = refined_segments[gc.segment_index]
                     # Apply correction to the refined text
@@ -198,7 +213,7 @@ class CorrectionEngine:
         all_corrections.extend(lex_corrections)
 
         # --- Layer 2: N-Gram + Anchor ---
-        text, ngram_corrections = self._layer_ngram(text, mode)
+        text, ngram_corrections = self._layer_ngram(text, mode, lex_corrections)
         all_corrections.extend(ngram_corrections)
 
         # --- Extract low-confidence words from per-word data ---
@@ -263,13 +278,31 @@ class CorrectionEngine:
         return corrected, details
 
     def _layer_ngram(
-        self, text: str, mode: Optional[AnchorMode] = None
+        self, text: str, mode: Optional[AnchorMode] = None,
+        lex_corrections: Optional[list[CorrectionDetail]] = None,
     ) -> tuple[str, list[CorrectionDetail]]:
         self.ngram_auditor.build_trigrams(text)
         candidates = self.ngram_auditor.audit()
 
+        # Build protected word set from lexicon corrections
+        protected: set[str] = set()
+        if lex_corrections:
+            for c in lex_corrections:
+                protected.update(self.ngram_auditor.tokenize(c.corrected))
+
         details: list[CorrectionDetail] = []
         for cand in candidates:
+            # Skip if the word being changed was introduced by lexicon
+            orig_set = set(cand.original_trigram)
+            sugg_set = set(cand.suggested_trigram)
+            changed = orig_set.symmetric_difference(sugg_set)
+            if changed & protected:
+                logger.debug(
+                    "N-gram skipped (lexicon-protected): %s → %s",
+                    cand.original_trigram, cand.suggested_trigram,
+                )
+                continue
+
             orig_phrase = " ".join(cand.original_trigram)
             sugg_phrase = " ".join(cand.suggested_trigram)
 
@@ -293,7 +326,10 @@ class CorrectionEngine:
         return text, details
 
     def _auto_add_lexicon_rule(self, gc: GeminiCorrection) -> None:
-        """Add a Gemini correction as a probationary lexicon rule."""
+        """Add a Gemini correction as a probationary lexicon rule (Gate 2: check blocklist)."""
+        if self._is_blocklisted(gc.original, gc.corrected):
+            logger.info("Blocklist prevented auto-learn: '%s' → '%s'", gc.original, gc.corrected)
+            return
         try:
             with get_db() as conn:
                 conn.execute(
@@ -306,7 +342,10 @@ class CorrectionEngine:
             logger.warning("Failed to auto-add lexicon rule '%s': %s", gc.original, e)
 
     def _auto_add_ngram_rule(self, original: str, corrected: str) -> None:
-        """Add an N-Gram correction as a probationary lexicon rule."""
+        """Add an N-Gram correction as a probationary lexicon rule (Gate 2: check blocklist)."""
+        if self._is_blocklisted(original, corrected):
+            logger.info("Blocklist prevented N-gram auto-learn: '%s' → '%s'", original, corrected)
+            return
         try:
             with get_db() as conn:
                 conn.execute(
@@ -322,10 +361,12 @@ class CorrectionEngine:
         """
         Auto-promote probationary lexicon rules that meet promotion criteria:
         - Applied in >= 3 distinct sessions (via correction_log occurrences)
+        - NOT on the blocklist (Gate 3)
         """
         try:
             with get_db() as conn:
                 # Find probationary rules whose correction has been logged >= 3 times
+                # Gate 3: exclude any pair that appears in the blocklist
                 cur = conn.execute(
                     """
                     SELECT l.id, l.wrong_phrase, l.correct_phrase
@@ -335,6 +376,11 @@ class CorrectionEngine:
                      AND LOWER(cl.corrected_phrase) = LOWER(l.correct_phrase)
                     WHERE l.is_permanent = FALSE
                       AND cl.occurrences >= 3
+                      AND NOT EXISTS (
+                          SELECT 1 FROM lexicon_blocklist bl
+                          WHERE LOWER(bl.wrong_phrase) = LOWER(l.wrong_phrase)
+                            AND LOWER(bl.correct_phrase) = LOWER(l.correct_phrase)
+                      )
                     """
                 )
                 rows = cur.fetchall()

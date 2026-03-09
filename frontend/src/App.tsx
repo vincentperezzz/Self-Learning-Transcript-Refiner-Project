@@ -7,6 +7,7 @@ import UploadPage from "./pages/UploadPage";
 import SessionDetailPage from "./pages/SessionDetailPage";
 import LexiconPage from "./pages/LexiconPage";
 import NGramPage from "./pages/NGramPage";
+import BlocklistPage from "./pages/BlocklistPage";
 import AccountPage from "./pages/AccountPage";
 import SelfLearningPage from "./pages/SelfLearningPage";
 
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="upload" element={<UploadPage />} />
           <Route path="sessions/:key" element={<SessionDetailPage />} />
           <Route path="lexicon" element={<LexiconPage />} />
+          <Route path="blocklist" element={<BlocklistPage />} />
           <Route path="ngram" element={<NGramPage />} />
           <Route path="self-learning" element={<SelfLearningPage />} />
           <Route path="account" element={<AccountPage />} />

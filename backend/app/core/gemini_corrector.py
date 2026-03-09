@@ -162,6 +162,8 @@ mangled, financial terms, call-center script phrases, collection-specific termin
 - Grammar or style (only fix ASR transcription errors, not language quality)
 - Already-correct currency symbols like ₱
 - Words/phrases that appear correct in context — our system handles deduplication
+- NEVER change English pronouns "you", "your", "you're", "yours" to Filipino \
+"po" or "por" — these are VALID English words in code-switched sentences
 
 ═══ IMPORTANT CONTEXT ═══
 - "ho/po" are Filipino politeness particles — do NOT change them
