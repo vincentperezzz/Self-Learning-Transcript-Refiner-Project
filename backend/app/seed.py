@@ -32,6 +32,8 @@ def seed_lexicon() -> int:
         ("spm.spmadridlaw.com", "spm@spmadridlaw.com", "email @ misheard as dot", None),
         ("SPM at SPMadridLaw.com", "spm@spmadridlaw.com", "email dictation", None),
         ("SPM at SPMadridLaw dot com", "spm@spmadridlaw.com", "email dictation", None),
+        ("spm at spmadridlo.com", "spm@spmadridlaw.com", "email: spmadridlo misheard + @ as at", None),
+        ("spm at spmadridlo dot com", "spm@spmadridlaw.com", "email: spmadridlo misheard + @ as at", None),
         ("1delacruz@spmadridlaw.com", "jdelacruz@spmadridlaw.com", "email initial misheard", None),
         ("wandelacruz@spmadridlaw.com", "jdelacruz@spmadridlaw.com", "email name misheard", None),
         # Double-word corrections (Whisper repetition artifacts)

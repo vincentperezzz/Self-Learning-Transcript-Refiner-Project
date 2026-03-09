@@ -227,6 +227,10 @@ class CorrectionEngine:
         text, dedup_corrections = self._post_dedup_words(text)
         all_corrections.extend(dedup_corrections)
 
+        # --- Post-processing: email normalizer ("word at word.com" → "word@word.com") ---
+        text, email_corrections = self._post_email_normalize(text)
+        all_corrections.extend(email_corrections)
+
         # Log every correction for the self-learning loop
         for c in all_corrections:
             self.correction_logger.log(c.original, c.corrected, c.source)
@@ -466,6 +470,27 @@ class CorrectionEngine:
                 CorrectionDetail(
                     original="double word",
                     corrected="deduplicated",
+                    source=CorrectionSource.LEXICON,
+                )
+            )
+        return new_text, details
+
+    # Regex: "word at word.com" or "word at word.com." → "word@word.com"
+    # Whisper often transcribes the @ symbol as the word "at"
+    _EMAIL_AT_RE = re.compile(
+        r'\b([a-zA-Z0-9._-]+)\s+at\s+([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b',
+        re.IGNORECASE,
+    )
+
+    def _post_email_normalize(self, text: str) -> tuple[str, list[CorrectionDetail]]:
+        """Convert 'word at domain.com' → 'word@domain.com' when it looks like email."""
+        details: list[CorrectionDetail] = []
+        new_text = self._EMAIL_AT_RE.sub(r'\1@\2', text)
+        if new_text != text:
+            details.append(
+                CorrectionDetail(
+                    original="email 'at' as word",
+                    corrected="@ symbol",
                     source=CorrectionSource.LEXICON,
                 )
             )
