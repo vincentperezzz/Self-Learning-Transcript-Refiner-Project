@@ -2,16 +2,21 @@ import { useEffect, useState, type FormEvent } from "react";
 import {
   addLexiconRule,
   deleteLexiconRule,
+  demoteLexiconRule,
   listLexicon,
+  promoteLexiconRule,
   updateLexiconRule,
 } from "../api";
 import type { LexiconRule } from "../types";
+
+type StatusFilter = "all" | "permanent" | "probationary";
 
 export default function LexiconPage() {
   const [rules, setRules] = useState<LexiconRule[]>([]);
   const [editId, setEditId] = useState<number | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   // Form state
   const [wrongPhrase, setWrongPhrase] = useState("");
@@ -81,12 +86,38 @@ export default function LexiconPage() {
     } catch {}
   }
 
-  const filtered = rules.filter(
-    (r) =>
+  async function handlePromote(id: number) {
+    try {
+      await promoteLexiconRule(id);
+      setRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, is_permanent: true } : r)),
+      );
+    } catch {}
+  }
+
+  async function handleDemote(id: number) {
+    try {
+      await demoteLexiconRule(id);
+      setRules((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, is_permanent: false } : r)),
+      );
+    } catch {}
+  }
+
+  const permanentCount = rules.filter((r) => r.is_permanent).length;
+  const probationaryCount = rules.filter((r) => !r.is_permanent).length;
+
+  const filtered = rules.filter((r) => {
+    const matchesSearch =
       !search ||
       r.wrong_phrase.toLowerCase().includes(search.toLowerCase()) ||
-      r.correct_phrase.toLowerCase().includes(search.toLowerCase()),
-  );
+      r.correct_phrase.toLowerCase().includes(search.toLowerCase());
+    const matchesStatus =
+      statusFilter === "all" ||
+      (statusFilter === "permanent" && r.is_permanent) ||
+      (statusFilter === "probationary" && !r.is_permanent);
+    return matchesSearch && matchesStatus;
+  });
 
   return (
     <div className="space-y-6">
@@ -112,6 +143,40 @@ export default function LexiconPage() {
         className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm
                    text-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-600"
       />
+
+      {/* Status filter tabs */}
+      <div className="flex gap-2">
+        <button
+          onClick={() => setStatusFilter("all")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            statusFilter === "all"
+              ? "bg-gray-700 text-white"
+              : "bg-gray-800/50 text-gray-400 hover:text-gray-200"
+          }`}
+        >
+          All ({rules.length})
+        </button>
+        <button
+          onClick={() => setStatusFilter("permanent")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            statusFilter === "permanent"
+              ? "bg-emerald-900/60 text-emerald-400"
+              : "bg-gray-800/50 text-gray-400 hover:text-emerald-400"
+          }`}
+        >
+          Permanent ({permanentCount})
+        </button>
+        <button
+          onClick={() => setStatusFilter("probationary")}
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+            statusFilter === "probationary"
+              ? "bg-amber-900/60 text-amber-400"
+              : "bg-gray-800/50 text-gray-400 hover:text-amber-400"
+          }`}
+        >
+          Probationary ({probationaryCount})
+        </button>
+      </div>
 
       {/* Add/Edit Form */}
       {showAdd && (
@@ -237,6 +302,28 @@ export default function LexiconPage() {
                 </td>
                 <td className="py-2">
                   <div className="flex gap-1">
+                    {!rule.is_permanent && (
+                      <button
+                        onClick={() => handlePromote(rule.id)}
+                        title="Promote to permanent"
+                        className="p-1 rounded hover:bg-emerald-700/50 text-gray-400 hover:text-emerald-400 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-8.707l-3-3a1 1 0 00-1.414 0l-3 3a1 1 0 001.414 1.414L9 9.414V13a1 1 0 102 0V9.414l1.293 1.293a1 1 0 001.414-1.414z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    )}
+                    {rule.is_permanent && (
+                      <button
+                        onClick={() => handleDemote(rule.id)}
+                        title="Demote to probationary"
+                        className="p-1 rounded hover:bg-amber-700/50 text-gray-400 hover:text-amber-400 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                          <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v3.586L7.707 9.293a1 1 0 00-1.414 1.414l3 3a1 1 0 001.414 0l3-3a1 1 0 00-1.414-1.414L11 10.586V7z" clipRule="evenodd" />
+                        </svg>
+                      </button>
+                    )}
                     <button
                       onClick={() => startEdit(rule)}
                       title="Edit rule"

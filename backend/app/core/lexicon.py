@@ -1,8 +1,9 @@
 """
 Lexicon – Layer 1 of the Correction Hierarchy.
 
-Performs fast, deterministic lookups against Table A (Permanent Lexicon)
-for known Whisper errors and their golden-rule corrections.
+Performs fast, deterministic lookups against the Lexicon table
+for known Whisper errors and their corrections.
+Both permanent and probationary rules are applied.
 Uses Redis cache for repeated lookups.
 """
 
@@ -27,7 +28,7 @@ class LexiconMatch:
 
 class LexiconChecker:
     """
-    Checks transcript text against permanent lexicon rules.
+    Checks transcript text against all lexicon rules (permanent + probationary).
     Optionally filters by anchor_mode for context-aware corrections.
     """
 
@@ -82,8 +83,7 @@ class LexiconChecker:
                 cur = conn.execute(
                     "SELECT wrong_phrase, correct_phrase, anchor_mode "
                     "FROM lexicon "
-                    "WHERE is_permanent = TRUE "
-                    "  AND (anchor_mode IS NULL OR anchor_mode = %s) "
+                    "WHERE (anchor_mode IS NULL OR anchor_mode = %s) "
                     "ORDER BY length(wrong_phrase) DESC",
                     (anchor_mode.value,),
                 )
@@ -91,7 +91,6 @@ class LexiconChecker:
                 cur = conn.execute(
                     "SELECT wrong_phrase, correct_phrase, anchor_mode "
                     "FROM lexicon "
-                    "WHERE is_permanent = TRUE "
                     "ORDER BY length(wrong_phrase) DESC",
                 )
             rows = cur.fetchall()

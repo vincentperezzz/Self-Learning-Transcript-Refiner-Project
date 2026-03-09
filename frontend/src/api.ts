@@ -234,6 +234,18 @@ export function deleteLexiconRule(id: number) {
   return request<{ status: string }>(`/lexicon/${id}`, { method: "DELETE" });
 }
 
+export function promoteLexiconRule(id: number) {
+  return request<{ status: string; id: number }>(`/lexicon/${id}/promote`, {
+    method: "PATCH",
+  });
+}
+
+export function demoteLexiconRule(id: number) {
+  return request<{ status: string; id: number }>(`/lexicon/${id}/demote`, {
+    method: "PATCH",
+  });
+}
+
 // ---------------------------------------------------------------------------
 // N-Gram
 // ---------------------------------------------------------------------------

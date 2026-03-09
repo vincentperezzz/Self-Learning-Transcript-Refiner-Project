@@ -41,7 +41,7 @@ The lexicon is a database table of **known Whisper mistakes** and their correct 
 | recorded deadline | recorded line | COLLECTIONS |
 | Future Bank | Future Bank | (any) |
 
-**Self-learning:** Gemini corrections are auto-added to the lexicon as permanent rules. N-Gram corrections are auto-added as probationary rules (visible on the Lexicon page with an amber badge). Human "Correct with Gemini" overrides auto-delete conflicting probationary rules (reverse detection). The correction log tracks all corrections across sources for transparency.
+**Self-learning:** Gemini corrections are auto-added to the lexicon as probationary rules. N-Gram corrections are also auto-added as probationary rules. All probationary rules are immediately active (applied by L1). Rules earn permanent status through auto-promotion (≥3 occurrences) or manual promotion. Human "Correct with Gemini" overrides delete conflicting probationary rules and demote conflicting permanent rules (trust erosion). The correction log tracks all corrections across sources for transparency.
 
 ---
 
@@ -199,10 +199,11 @@ The system gets smarter over time through four feedback mechanisms:
 Every time Gemini corrects a word/phrase:
 1. The correction is **applied** to the current transcript
 2. The correction is **logged** in `correction_log` with `source=gemini`
-3. A **permanent lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (`is_permanent=TRUE`)
-4. On the next transcription, **Layer 1 (Lexicon)** catches this pattern — no Gemini call needed
+3. A **probationary lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (`is_permanent=FALSE`)
+4. Because both permanent and probationary rules are loaded by Layer 1, the rule is **immediately active** for future transcripts
+5. After the rule has been applied in **≥3 distinct sessions** (correction_log occurrences ≥ 3), it is **auto-promoted to permanent**
 
-This means the system learns from each session. Over time, the lexicon grows and Gemini handles only genuinely new, unseen errors.
+This means the system still learns from each session — corrections are immediately effective — but they must prove their worth before becoming permanently trusted.
 
 **Token Optimization:** Gemini receives only the rules that L1 actually applied to the current transcript (~50 tokens) instead of the entire lexicon. Duplicate corrections are filtered post-Gemini before applying.
 
@@ -211,23 +212,32 @@ This means the system learns from each session. Over time, the lexicon grows and
 When N-Gram (L2) makes a correction:
 1. The correction is **applied** to the transcript and **logged** in `correction_log` with `source=ngram_anchor`
 2. A **probationary lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (`is_permanent=FALSE`)
-3. Probationary rules **work identically** to permanent rules — L1 catches them on future transcripts
+3. Both permanent and probationary rules are loaded by Layer 1, so the rule is **immediately active** for future transcripts
 4. They are visually distinct on the Lexicon page (amber "Probationary" badge vs green "Permanent")
-5. Users can review and confirm/delete probationary rules at their leisure
+5. After ≥3 sessions (occurrences ≥ 3), the rule is **auto-promoted to permanent**
+6. Users can also manually promote rules via the Promote button on the Lexicon page
 
 **Why probationary?** N-Gram corrections are statistical (based on trigram frequency), not semantic. While the safety guards are strict (phonetic similarity, zero-frequency check, min frequency threshold), there's a small chance of false positives. Probationary status flags them for optional human review.
 
-### Mechanism 3: Reverse Detection (Self-Correcting)
+### Mechanism 3: Reverse Detection (Trust Erosion)
 
-If a user corrects a segment via the "Correct with Gemini" button and the correction **overrides** a probationary N-Gram rule:
-1. Any probationary lexicon rule whose `correct_phrase` matches the word the user says is wrong gets **automatically deleted**
-2. The user's correction is added as a **permanent** lexicon rule (`is_permanent=TRUE`)
-3. The system learns from its mistakes — bad N-Gram promotions are self-cleaning
+When a user corrects a segment via the "Correct with Gemini" button, the system applies a **trust erosion** model to conflicting lexicon rules:
+
+| Old Rule Status | Action |
+|---|---|
+| **Probationary** | **Deleted** (no second chance — the rule was wrong) |
+| **Permanent** | **Demoted to probationary** (trust eroded — must re-earn permanent status) |
+
+The new correction from the human-guided Gemini call is always inserted as a **probationary** rule. It must earn permanent status through the same promotion criteria (≥3 occurrences).
 
 **Example flow:**
-- N-Gram promotes: `"recorded deadline"` → `"recorded line"` (probationary)
+- Gemini auto-learns: `"recorded deadline"` → `"recorded line"` (probationary)
 - User clicks "Correct with Gemini" and says `"line"` should actually be `"deadline"` in this context
-- System deletes the probationary rule and adds a permanent rule: `"recorded line"` → `"recorded deadline"`
+- System **deletes** the probationary rule `"recorded deadline" → "recorded line"`
+- System adds a new **probationary** rule: `"recorded line"` → `"recorded deadline"`
+- If a permanent rule had `"line"` as its `correct_phrase`, it would be **demoted** to probationary
+
+**Demoted rules reset:** When a permanent rule is demoted, it must re-earn its 3 sessions from scratch for re-promotion.
 
 ### Mechanism 4: Human-Guided Gemini Correction
 
@@ -238,21 +248,34 @@ Users can manually correct individual segments using the "Correct with Gemini" b
 3. Gemini returns the corrected text and a list of changes
 4. The correction is:
    - **Applied** to the session result in the database
-   - **Auto-added to the lexicon** as a permanent rule with context hint `"human-guided Gemini correction"`
-   - Any conflicting probationary rules are **auto-deleted** (reverse detection)
+   - **Auto-added to the lexicon** as a **probationary** rule with context hint `"human-guided Gemini correction (probationary)"`
+   - Any conflicting probationary rules are **deleted**, and conflicting permanent rules are **demoted** (trust erosion)
    - **Logged** in `correction_log` with `source=gemini`
-5. Future transcriptions will catch the same pattern via Layer 1 (Lexicon)
+5. The new rule is immediately active for future transcriptions via Layer 1
+6. It earns permanent status through the standard promotion criteria (≥3 occurrences)
 
 ### Mechanism 5: N-Gram Growth
 
 After every refinement, the corrected text is ingested back into the N-gram frequency table. This makes the system progressively better at recognizing valid 3-word sequences, reducing false N-gram replacements.
 
+### Mechanism 6: Auto-Promotion (Probationary → Permanent)
+
+After each transcription session, the system checks all probationary rules for auto-promotion eligibility:
+
+| Criterion | Threshold |
+|---|---|
+| Applied in N distinct sessions (via correction_log occurrences) | ≥ 3 |
+
+When all criteria are met, the rule is automatically promoted to permanent (`is_permanent = TRUE`).
+
+Users can also **manually promote** any probationary rule via the green arrow button on the Lexicon page (`PATCH /api/v1/lexicon/{id}/promote`).
+
 ### Lexicon Rule Types
 
 | Type | `is_permanent` | Source | Badge Color | Behavior |
 |---|---|---|---|---|
-| **Permanent** | `TRUE` | Human-added, Gemini auto-learn, Gemini human-guided | Green | Always applied, curated |
-| **Probationary** | `FALSE` | N-Gram auto-promote | Amber | Applied by L1, flagged for review, auto-removed on human override |
+| **Permanent** | `TRUE` | Human-added, auto-promoted (earned ≥3 sessions), manually promoted | Green | Always applied, trusted |
+| **Probationary** | `FALSE` | Gemini auto-learn, N-Gram auto-promote, human-guided Gemini | Amber | Applied by L1 (same as permanent), flagged for review, auto-removed/demoted on human override, eligible for auto-promotion |
 
 ### Occurrence Tracking
 
@@ -302,9 +325,20 @@ Each segment in the corrections view has a gradient violet→indigo button with 
 ### Lexicon Page
 View, add, edit, and delete lexicon rules. Each rule has: wrong phrase, correct phrase, optional context hint, and optional anchor mode. Search box filters rules in real-time.
 
+**Status filter tabs** at the top allow filtering by:
+- **All** — shows all rules with total count
+- **Permanent** (green) — only rules with `is_permanent = TRUE`, with count
+- **Probationary** (amber) — only rules with `is_permanent = FALSE`, with count
+
 Rules show a **Status** badge:
-- **Permanent** (green) — human-added, Gemini auto-learned, or human-guided corrections
-- **Probationary** (amber) — auto-promoted from N-Gram analysis, subject to review and reverse detection
+- **Permanent** (green) — earned through auto-promotion (≥3 occurrences), manually promoted, or human-added
+- **Probationary** (amber) — auto-learned from Gemini, auto-promoted from N-Gram analysis, or human-guided Gemini corrections; subject to review, auto-promotion, and reverse detection
+
+**Actions per rule:**
+- **Promote** (green up-arrow, probationary only) — manually promote to permanent
+- **Demote** (amber down-arrow, permanent only) — manually demote to probationary
+- **Edit** (pencil) — modify wrong/correct phrases, context hint, and anchor mode
+- **Delete** (trash) — remove the rule entirely
 
 ### N-Gram Page
 Browse the trigram frequency database with search, pagination, and frequency bar visualization. Shows all stored 3-word sequences sorted by frequency (highest first). Each row displays word1, word2, word3, frequency count, and a proportional bar chart.
@@ -338,50 +372,86 @@ Groq Whisper API (whisper-large-v3-turbo)
     ▼
 ┌─────────────────────────────────────────┐
 │         Semantic Anchor Scanner         │
-│   (detects BANKING/COLLECTIONS/VERIFY)  │
+│   (detects intent: 18 anchor modes)     │
 └─────────────────────────────────────────┘
     │
     ▼ anchor_mode per segment
     │
 ┌─────────────────────────────────────────┐
-│        Layer 1: Lexicon Lookup          │
-│     (permanent rules from Table A)      │
-│  (includes auto-learned Gemini rules)   │
-└─────────────────────────────────────────┘
+│  Layer 1: Lexicon Lookup (ALL rules)    │  ◄─── new rules added here ──────┐
+│  • Permanent + Probationary rules       │                                  │
+│  • Filtered by anchor_mode              │                                  │
+│  • Longest-match-first ordering         │                                  │
+└─────────────────────────────────────────┘                                  │
+    │                                                                        │
+    ▼                                                                        │
+┌─────────────────────────────────────────┐                                  │
+│    Layer 2: N-Gram + Anchor Analysis    │                                  │
+│  • Trigram frequency from Table B       │                                  │
+│  • Phonetic similarity guard            │                                  │
+│  • Zero-freq check + min-freq threshold │                                  │
+└─────────────────────────────────────────┘                                  │
+    │                      │                                                 │
+    │                      └──▶ Auto-add as PROBATIONARY ─────────────────────┤
+    ▼                           lexicon rule (is_permanent=FALSE)             │
+┌─────────────────────────────────────────┐                                  │
+│         Post-Processing                 │                                  │
+│  • "X pesos and Y centavos" → ₱X.YY    │                                  │
+│  • Currency symbol normalize (P/$→₱)    │                                  │
+│  • Double-word dedup                    │                                  │
+└─────────────────────────────────────────┘                                  │
+    │                                                                        │
+    ▼                                                                        │
+┌─────────────────────────────────────────┐                                  │
+│   Layer 3: Gemini 2.5 Flash Teacher     │                                  │
+│  • Analyzes full transcript (1 API call)│                                  │
+│  • Corrects remaining Whisper errors    │                                  │
+│  • Receives applied L1 rules as context │                                  │
+└─────────────────────────────────────────┘                                  │
+    │                      │                                                 │
+    │                      └──▶ Auto-add as PROBATIONARY ─────────────────────┘
+    ▼                           lexicon rule (is_permanent=FALSE)
     │
-    ▼
-┌─────────────────────────────────────────┐
-│    Layer 2: N-Gram + Anchor Analysis    │
-│  (trigram frequency from Table B +      │
-│   phonetic similarity guard)            │
-└─────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│         Post-Processing                 │
-│  • "X pesos and Y centavos" → ₱X.YY    │
-│  • "X pesos" → ₱X.00                   │
-│  • Strip redundant "centavos" after ₱   │
-│  • Currency symbol normalize (P/$→₱)    │
-│  • Double-word dedup                    │
-└─────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│   Layer 3: Gemini 2.5 Flash Teacher     │
-│  • Analyzes full transcript (1 API call)│
-│  • Corrects remaining Whisper errors    │
-│  • Auto-adds corrections to lexicon     │
-│  • Logs for self-learning tracking      │
-└─────────────────────────────────────────┘
-    │
-    ▼
 Refined Transcript + Correction Details
     │
     ├──▶ Saved to DB (transcription_sessions)
     ├──▶ Corrections logged (correction_log)
-    ├──▶ New lexicon rules created (auto-learn)
-    └──▶ N-grams ingested (self-learning)
+    │         │
+    │         ▼
+    │    ┌──────────────────────────────────────────┐
+    │    │       Auto-Promotion Check               │
+    │    │  For each probationary rule applied:      │
+    │    │                                          │
+    │    │  correction_log.occurrences >= 3 ?        │
+    │    │     YES ──▶ Promote to PERMANENT          │
+    │    │              (is_permanent = TRUE)         │
+    │    │     NO  ──▶ Stay PROBATIONARY             │
+    │    │              (wait for more sessions)      │
+    │    └──────────────────────────────────────────┘
+    │
+    └──▶ N-grams ingested into Table B (self-learning)
+```
+
+### Human Override Flow (Trust Erosion)
+
+```
+User clicks "Correct with Gemini" on a segment
+    │
+    ▼
+Gemini returns corrected text + list of changes
+    │
+    ▼ For each change (orig → corrected):
+    │
+    ├──▶ Conflicting PROBATIONARY rule found?
+    │       (rule.correct_phrase matches orig)
+    │         YES ──▶ DELETE the rule (no second chance)
+    │
+    ├──▶ Conflicting PERMANENT rule found?
+    │       (rule.correct_phrase matches orig)
+    │         YES ──▶ DEMOTE to PROBATIONARY (trust eroded)
+    │
+    └──▶ Insert new correction as PROBATIONARY rule
+              (must earn ≥3 occurrences to become permanent)
 ```
 
 ## Database Tables
@@ -416,6 +486,8 @@ Refined Transcript + Correction Details
 | POST | `/api/v1/lexicon` | Add a lexicon rule |
 | PUT | `/api/v1/lexicon/{id}` | Update a lexicon rule |
 | DELETE | `/api/v1/lexicon/{id}` | Delete a lexicon rule |
+| PATCH | `/api/v1/lexicon/{id}/promote` | Promote probationary rule to permanent |
+| PATCH | `/api/v1/lexicon/{id}/demote` | Demote permanent rule to probationary |
 | GET | `/api/v1/ngram` | List N-grams (search, pagination) |
 | POST | `/api/v1/ngram/ingest` | Ingest trigrams from texts |
 | GET | `/api/v1/ngram/lookup` | Lookup single trigram frequency |

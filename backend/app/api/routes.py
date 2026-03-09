@@ -323,25 +323,36 @@ def correct_segment(
                     "corrected": corr,
                     "source": "gemini",
                 })
-                # Remove probationary N-Gram rules that produced the wrong word
+                # Reverse detection: handle conflicting lexicon rules
                 try:
                     with get_db() as conn:
+                        # Delete probationary rules whose correct_phrase matches
+                        # the word the human says is wrong (no second chance)
                         conn.execute(
                             "DELETE FROM lexicon WHERE correct_phrase ILIKE %s "
                             "AND is_permanent = FALSE",
                             (orig,),
                         )
+                        # Demote permanent rules whose correct_phrase matches
+                        # the word the human says is wrong (trust erosion)
+                        conn.execute(
+                            "UPDATE lexicon SET is_permanent = FALSE, "
+                            "context_hint = COALESCE(context_hint, '') || ' [demoted by human override]' "
+                            "WHERE correct_phrase ILIKE %s "
+                            "AND is_permanent = TRUE",
+                            (orig,),
+                        )
                 except Exception:
                     pass
-                # Auto-add to lexicon for future matching (permanent — human-validated)
+                # Auto-add new correction as probationary (must earn permanent)
                 try:
                     with get_db() as conn:
                         conn.execute(
                             "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
-                            "VALUES (%s, %s, %s, TRUE) ON CONFLICT (wrong_phrase) DO UPDATE "
+                            "VALUES (%s, %s, %s, FALSE) ON CONFLICT (wrong_phrase) DO UPDATE "
                             "SET correct_phrase = EXCLUDED.correct_phrase, "
-                            "context_hint = EXCLUDED.context_hint, is_permanent = TRUE",
-                            (orig.lower(), corr, "human-guided Gemini correction"),
+                            "context_hint = EXCLUDED.context_hint, is_permanent = FALSE",
+                            (orig.lower(), corr, "human-guided Gemini correction (probationary)"),
                         )
                 except Exception:
                     pass
@@ -496,6 +507,48 @@ def delete_lexicon_rule(
     from app.cache import cache_delete_pattern
     cache_delete_pattern("lexicon:*")
     return {"status": "deleted"}
+
+
+@router.patch("/lexicon/{rule_id}/promote")
+def promote_lexicon_rule(
+    rule_id: int,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Manually promote a probationary lexicon rule to permanent."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE lexicon SET is_permanent = TRUE, "
+            "context_hint = COALESCE(context_hint, '') || ' [manually promoted]' "
+            "WHERE id = %s AND is_permanent = FALSE RETURNING id",
+            (rule_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Rule not found or already permanent")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("lexicon:*")
+    return {"status": "promoted", "id": rule_id}
+
+
+@router.patch("/lexicon/{rule_id}/demote")
+def demote_lexicon_rule(
+    rule_id: int,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Manually demote a permanent lexicon rule to probationary."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE lexicon SET is_permanent = FALSE, "
+            "context_hint = COALESCE(context_hint, '') || ' [manually demoted]' "
+            "WHERE id = %s AND is_permanent = TRUE RETURNING id",
+            (rule_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Rule not found or already probationary")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("lexicon:*")
+    return {"status": "demoted", "id": rule_id}
 
 
 # ===================================================================

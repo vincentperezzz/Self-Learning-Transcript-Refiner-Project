@@ -161,6 +161,9 @@ class CorrectionEngine:
         corrected_full = " ".join(rs.refined_text for rs in refined_segments)
         self.ngram_auditor.ingest_text(corrected_full)
 
+        # Check for probationary rules that qualify for auto-promotion
+        self._check_promotions()
+
         return RefinementResponse(
             segments=refined_segments,
             total_corrections=total_corrections,
@@ -274,14 +277,14 @@ class CorrectionEngine:
         return text, details
 
     def _auto_add_lexicon_rule(self, gc: GeminiCorrection) -> None:
-        """Add a Gemini correction to the lexicon so L1 catches it next time."""
+        """Add a Gemini correction as a probationary lexicon rule."""
         try:
             with get_db() as conn:
                 conn.execute(
                     "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
-                    "VALUES (%s, %s, %s, TRUE) "
+                    "VALUES (%s, %s, %s, FALSE) "
                     "ON CONFLICT (wrong_phrase) DO NOTHING",
-                    (gc.original.lower(), gc.corrected, "auto-learned from Gemini"),
+                    (gc.original.lower(), gc.corrected, "auto-learned from Gemini (probationary)"),
                 )
         except Exception as e:
             logger.warning("Failed to auto-add lexicon rule '%s': %s", gc.original, e)
@@ -298,6 +301,46 @@ class CorrectionEngine:
                 )
         except Exception as e:
             logger.warning("Failed to auto-add N-Gram rule '%s': %s", original, e)
+
+    def _check_promotions(self) -> None:
+        """
+        Auto-promote probationary lexicon rules that meet promotion criteria:
+        - Applied in >= 3 distinct sessions (via correction_log occurrences)
+        """
+        try:
+            with get_db() as conn:
+                # Find probationary rules whose correction has been logged >= 3 times
+                cur = conn.execute(
+                    """
+                    SELECT l.id, l.wrong_phrase, l.correct_phrase
+                    FROM lexicon l
+                    JOIN correction_log cl
+                      ON LOWER(cl.original_phrase) = LOWER(l.wrong_phrase)
+                     AND LOWER(cl.corrected_phrase) = LOWER(l.correct_phrase)
+                    WHERE l.is_permanent = FALSE
+                      AND cl.occurrences >= 3
+                    """
+                )
+                rows = cur.fetchall()
+
+                for row in rows:
+                    conn.execute(
+                        "UPDATE lexicon SET is_permanent = TRUE, "
+                        "context_hint = COALESCE(context_hint, '') || ' [auto-promoted]' "
+                        "WHERE id = %s",
+                        (row["id"],),
+                    )
+                    logger.info(
+                        "Auto-promoted lexicon rule #%d: '%s' → '%s'",
+                        row["id"], row["wrong_phrase"], row["correct_phrase"],
+                    )
+
+                if rows:
+                    # Flush lexicon cache so promoted rules are immediately effective
+                    from app.cache import cache_delete_pattern
+                    cache_delete_pattern("lexicon:*")
+        except Exception as e:
+            logger.warning("Auto-promotion check failed: %s", e)
 
     # ------------------------------------------------------------------
     # Post-processing
