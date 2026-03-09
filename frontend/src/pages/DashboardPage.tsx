@@ -270,7 +270,7 @@ export default function DashboardPage() {
                 onClick={() => navigate(`/sessions/${s.session_key}`)}
               >
               {/* File */}
-              <div className="col-span-3 text-sm text-gray-200 truncate font-medium">
+              <div className="col-span-3 text-sm text-gray-200 truncate font-medium" title={s.filename}>
                 {s.filename}
               </div>
 
