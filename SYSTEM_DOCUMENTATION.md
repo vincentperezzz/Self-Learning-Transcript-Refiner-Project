@@ -42,9 +42,23 @@ The lexicon is a database table of **known Whisper mistakes** and their correct 
 | recorded deadline | recorded line | COLLECTIONS |
 | Future Bank | Future Bank | (any) |
 
-**Self-learning:** Gemini corrections are auto-added to the lexicon as probationary rules. N-Gram corrections are also auto-added as probationary rules. All probationary rules are immediately active (applied by L1). Rules earn permanent status through auto-promotion (≥3 occurrences) or manual promotion. Human "Correct with Gemini" overrides delete conflicting probationary rules and demote conflicting permanent rules (trust erosion). The correction log tracks all corrections across sources for transparency.
+**Self-learning:** Gemini corrections are auto-added to the lexicon as probationary rules and are immediately active (applied by L1). Rules earn permanent status through auto-promotion (≥3 occurrences) or manual promotion. N-Gram corrections stay in the N-gram domain — they are NOT promoted to the lexicon; instead, N-gram learns through frequency table growth when corrected text is ingested. Human "Correct with Gemini" overrides delete conflicting probationary rules and demote conflicting permanent rules (trust erosion). The correction log tracks all corrections across sources for transparency.
 
 **Blocklist Protection:** Before any auto-learning or auto-promotion, the system checks the `lexicon_blocklist` table. If a correction pair (wrong_phrase, correct_phrase) is blocklisted, it is silently rejected — never applied, never learned, never promoted. See the Blocklist section for details.
+
+**When to use Lexicon vs N-Gram:**
+
+| Use Lexicon when... | Use N-Gram when... |
+|---|---|
+| The correction is **always** correct regardless of surrounding words | The correction depends on **what words come before/after** |
+| Proper nouns: "Anna Dixman" → "Anna De Guzman" | Context-sensitive phrases: "minimum amount dew" → "minimum amount due" (but NOT "minimum amount lang") |
+| Deterministic substitutions: "birth date" → "birthdate" | Whisper mishearings where the wrong word could be valid in other contexts |
+| Company/brand names: "SP Madridlaw" → "SP Madrid Law" | Any correction where the same wrong word is correct in a different trigram context |
+
+**Example — why "minimum amount due" belongs in N-gram, not lexicon:**
+- `"kailangan niyo i-settle yung minimum amount dew"` → N-gram sees `(minimum, amount, dew)` freq=0, finds `(minimum, amount, due)` freq=2559 → corrects to "due" ✅
+- `"diko kayang bayaran yung minimum amount lang"` → N-gram sees `(minimum, amount, lang)` freq>0 → **leaves it alone** ✅
+- If this were a lexicon rule, it would blindly add "due" in both cases, corrupting the second sentence ❌
 
 ---
 
@@ -223,17 +237,22 @@ This means the system still learns from each session — corrections are immedia
 
 **Token Optimization:** Gemini receives only the rules that L1 actually applied to the current transcript (~50 tokens) instead of the entire lexicon. Duplicate corrections are filtered post-Gemini before applying.
 
-### Mechanism 2: N-Gram Probationary Promotion
+### Mechanism 2: N-Gram Frequency Growth (Self-Improving Context)
+
+N-gram corrections stay **entirely within the N-gram domain** — they are NOT promoted to the lexicon. This is by design:
+
+- **Lexicon** = context-blind (always replaces a phrase regardless of surrounding words)
+- **N-gram** = context-aware (checks 3-word windows, only corrects zero-frequency sequences)
 
 When N-Gram (L2) makes a correction:
 1. The correction is **applied** to the transcript and **logged** in `correction_log` with `source=ngram_anchor`
-2. A **probationary lexicon rule** is auto-created: `wrong_phrase → correct_phrase` (`is_permanent=FALSE`)
-3. Both permanent and probationary rules are loaded by Layer 1, so the rule is **immediately active** for future transcripts
-4. They are visually distinct on the Lexicon page (amber "Probationary" badge vs green "Permanent")
-5. After ≥3 sessions (occurrences ≥ 3), the rule is **auto-promoted to permanent**
-6. Users can also manually promote rules via the Promote button on the Lexicon page
+2. At the end of the pipeline, the **corrected text is ingested** back into the N-gram frequency table
+3. This means corrected trigrams gain frequency over time, making N-gram increasingly confident
+4. N-gram corrections are **not** added to the lexicon — the `ngram_frequency` table IS N-gram's persistent memory
 
-**Why probationary?** N-Gram corrections are statistical (based on trigram frequency), not semantic. While the safety guards are strict (phonetic similarity, zero-frequency check, min frequency threshold), there's a small chance of false positives. Probationary status flags them for optional human review.
+**Why no lexicon crossover?** N-gram corrections are contextual — "minimum amount dew" → "minimum amount due" is correct because `(minimum, amount, due)` has freq=2559. But "minimum amount lang" should stay unchanged because `(minimum, amount, lang)` also has frequency. A lexicon rule would lose this context-awareness and blindly replace in all contexts.
+
+**N-gram handles novel variants automatically:** If Whisper invents a new mishearing ("minimum amount joo"), N-gram catches it because `(minimum, amount, joo)` has zero frequency and `(minimum, amount, due)` is the dominant alternative. Lexicon would need a new rule for each variant.
 
 ### Mechanism 3: Reverse Detection (Trust Erosion)
 
@@ -283,7 +302,7 @@ After L1+L2 corrections, each segment is scanned against the N-gram corpus. Word
 
 Guard: words ≤ 2 characters are skipped to avoid false-flagging Filipino particles.
 
-Once Gemini corrects the unknown word, the correction flows through the standard self-learning loop (auto-added to lexicon as probationary, ingested into N-gram after correction).
+Once Gemini corrects the unknown word, the correction flows through the standard Gemini self-learning loop (auto-added to lexicon as probationary, ingested into N-gram after correction).
 
 ### Mechanism 7: Blocklist (Permanent Bans)
 
@@ -452,8 +471,8 @@ Groq Whisper API (whisper-large-v3-turbo)
 │  • Unknown word detection (zero corpus) │                                  │
 └─────────────────────────────────────────┘                                  │
     │                      │                                                 │
-    │                      ├──▶ Auto-add as PROBATIONARY ─────────────────────┤
-    │                      │    lexicon rule (is_permanent=FALSE)             │
+    │                      │                                                 │
+    │                      ├──▶ Corrections logged (stays in N-gram domain)  │
     │                      │                                                 │
     │                      └──▶ Unknown words flagged ──┐                    │
     ▼                                                   │                    │
