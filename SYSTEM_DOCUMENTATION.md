@@ -31,8 +31,9 @@ The lexicon is a database table of **known Whisper mistakes** and their correct 
 - Whisper consistently misrecognizes certain words and phrases (e.g., "birth date" → "birthdate", "SP Madrid" → correct casing)
 - The lexicon stores these as `wrong_phrase → correct_phrase` pairs
 - Rules can be scoped to a specific domain (e.g., only apply in BANKING contexts) or be universal
-- Matching is done via case-insensitive regex against the segment text
-- Rules are ordered by phrase length (longest first) to prevent partial matches from interfering
+- Matching is done via case-insensitive regex with **word boundary anchors** (`\b`) to prevent substring matches (e.g., `"bala"` won't match inside `"balak"`)
+- Rules are ordered by phrase length (longest first) to give specific phrases priority
+- Rules are applied **sequentially** (chained) — each rule runs against the result of the previous, so multi-rule corrections work correctly
 
 **Example lexicon rules:**
 | Wrong Phrase | Correct Phrase | Anchor Mode |
@@ -42,6 +43,8 @@ The lexicon is a database table of **known Whisper mistakes** and their correct 
 | Future Bank | Future Bank | (any) |
 
 **Self-learning:** Gemini corrections are auto-added to the lexicon as probationary rules. N-Gram corrections are also auto-added as probationary rules. All probationary rules are immediately active (applied by L1). Rules earn permanent status through auto-promotion (≥3 occurrences) or manual promotion. Human "Correct with Gemini" overrides delete conflicting probationary rules and demote conflicting permanent rules (trust erosion). The correction log tracks all corrections across sources for transparency.
+
+**Blocklist Protection:** Before any auto-learning or auto-promotion, the system checks the `lexicon_blocklist` table. If a correction pair (wrong_phrase, correct_phrase) is blocklisted, it is silently rejected — never applied, never learned, never promoted. See the Blocklist section for details.
 
 ---
 
@@ -175,6 +178,9 @@ Converts spoken numbers and peso amounts into `₱` format:
 ### Double-Word Deduplication
 Removes accidental repeated words like "settle settle" → "settle". Whisper occasionally stutters on word boundaries.
 
+### Email Normalizer
+Whisper often transcribes the `@` symbol as the word "at". The email normalizer pattern-matches `"word at domain.com"` → `"word@domain.com"` using a regex that requires a valid domain suffix (`.com`, `.ph`, etc.).
+
 ---
 
 ## Confidence Score (Shown on UI)
@@ -279,15 +285,42 @@ Guard: words ≤ 2 characters are skipped to avoid false-flagging Filipino parti
 
 Once Gemini corrects the unknown word, the correction flows through the standard self-learning loop (auto-added to lexicon as probationary, ingested into N-gram after correction).
 
-### Mechanism 7: Auto-Promotion (Probationary → Permanent)
+### Mechanism 7: Blocklist (Permanent Bans)
+
+The blocklist prevents the **self-poisoning feedback loop** where bad corrections get auto-learned, auto-promoted, and re-learned even after deletion.
+
+**The Problem it Solves:**
+```
+Gemini suggests bad correction → auto-added to lexicon
+  → applied in 3+ sessions → auto-promoted to PERMANENT
+  → corrected text ingested into N-gram (contaminates corpus)
+  → user deletes rule → Gemini suggests same correction again → cycle repeats
+```
+
+**How it Works:**
+
+A `lexicon_blocklist` table stores permanently banned (wrong_phrase, correct_phrase) pairs. The system checks the blocklist at **three gates**:
+
+| Gate | Location | What it blocks |
+|------|----------|----------------|
+| Gate 1 | Gemini correction application | Prevents the correction from being applied to the transcript AND from being auto-learned into the lexicon |
+| Gate 2 | `_auto_add_lexicon_rule()` / `_auto_add_ngram_rule()` | Prevents both Gemini and N-gram corrections from being auto-added as probationary rules |
+| Gate 3 | `_check_promotions()` | Prevents existing probationary rules from being auto-promoted to permanent |
+
+**Key design:** The blocklist bans **specific pairs**, not just phrases. Banning `"suspension" → "suspensions"` does NOT block `"suspension" → "suspensyon"` — only the exact wrong correction is blocked.
+
+**UI:** The Lexicon page's delete button now acts as a "Ban" button (🚫 icon) — it deletes the rule AND adds it to the blocklist with an optional reason. A dedicated Blocklist page allows viewing, searching, adding manual bans, and unbanning.
+
+### Mechanism 8: Auto-Promotion (Probationary → Permanent)
 
 After each transcription session, the system checks all probationary rules for auto-promotion eligibility:
 
 | Criterion | Threshold |
 |---|---|
 | Applied in N distinct sessions (via correction_log occurrences) | ≥ 3 |
+| NOT on the blocklist | Checked via `lexicon_blocklist` table |
 
-When all criteria are met, the rule is automatically promoted to permanent (`is_permanent = TRUE`).
+When all criteria are met, the rule is automatically promoted to permanent (`is_permanent = TRUE`). Blocklisted pairs are excluded from the promotion query.
 
 Users can also **manually promote** any probationary rule via the green arrow button on the Lexicon page (`PATCH /api/v1/lexicon/{id}/promote`).
 
@@ -359,7 +392,12 @@ Rules show a **Status** badge:
 - **Promote** (green up-arrow, probationary only) — manually promote to permanent
 - **Demote** (amber down-arrow, permanent only) — manually demote to probationary
 - **Edit** (pencil) — modify wrong/correct phrases, context hint, and anchor mode
-- **Delete** (trash) — remove the rule entirely
+- **Ban** (🚫 icon) — delete the rule AND add it to the blocklist so it can never be re-learned. Prompts for an optional reason.
+
+### Blocklist Page
+View and manage permanently banned correction pairs. Each entry shows: wrong phrase, banned correction (struck-through), reason, banned-by (manual/auto), and date. Actions:
+- **Add Ban** — manually add a correction pair to the blocklist
+- **Unban** (checkmark) — remove the ban, allowing the system to learn this correction again
 
 ### N-Gram Page
 Browse the trigram frequency database with search, pagination, and frequency bar visualization. Shows all stored 3-word sequences sorted by frequency (highest first). Each row displays word1, word2, word3, frequency count, and a proportional bar chart.
@@ -485,6 +523,7 @@ Gemini returns corrected text + list of changes
 | Table | Purpose | Key Columns |
 |---|---|---|
 | `lexicon` | Permanent word/phrase correction rules (Table A) | wrong_phrase, correct_phrase, context_hint, anchor_mode, is_permanent |
+| `lexicon_blocklist` | Permanently banned correction pairs | wrong_phrase, correct_phrase, reason, banned_by, created_at |
 | `ngram_frequency` | Trigram frequency counts for statistical analysis (Table B) | word1, word2, word3, frequency |
 | `correction_log` | Every correction ever made, for self-learning | original_phrase, corrected_phrase, source, occurrences, promoted |
 | `users` | Authentication accounts | username, password_hash, role |
@@ -511,7 +550,10 @@ Gemini returns corrected text + list of changes
 | GET | `/api/v1/lexicon` | List all lexicon rules |
 | POST | `/api/v1/lexicon` | Add a lexicon rule |
 | PUT | `/api/v1/lexicon/{id}` | Update a lexicon rule |
-| DELETE | `/api/v1/lexicon/{id}` | Delete a lexicon rule |
+| DELETE | `/api/v1/lexicon/{id}` | Ban a lexicon rule (delete + add to blocklist) |
+| GET | `/api/v1/blocklist` | List all blocklisted correction pairs |
+| POST | `/api/v1/blocklist` | Manually add a correction pair to the blocklist |
+| DELETE | `/api/v1/blocklist/{id}` | Unban a blocklisted correction pair |
 | PATCH | `/api/v1/lexicon/{id}/promote` | Promote probationary rule to permanent |
 | PATCH | `/api/v1/lexicon/{id}/demote` | Demote permanent rule to probationary |
 | GET | `/api/v1/ngram` | List N-grams (search, pagination) |
@@ -562,6 +604,7 @@ pgAdmin is included in the Docker setup for browsing the PostgreSQL database dir
 
 **Tables you'll find:**
 - `lexicon` — all permanent correction rules (wrong phrase → correct phrase)
+- `lexicon_blocklist` — permanently banned correction pairs (cannot be re-learned)
 - `ngram_frequency` — trigram word sequences with their frequency counts
 - `correction_log` — history of every correction the system has ever made
 - `users` — authentication accounts
