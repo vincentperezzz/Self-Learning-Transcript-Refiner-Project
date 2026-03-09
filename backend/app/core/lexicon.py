@@ -41,7 +41,9 @@ class LexiconChecker:
         matches: list[LexiconMatch] = []
 
         for rule in rules:
-            pattern = re.compile(re.escape(rule["wrong_phrase"]), re.IGNORECASE)
+            pattern = re.compile(
+                r'\b' + re.escape(rule["wrong_phrase"]) + r'\b', re.IGNORECASE
+            )
             for m in pattern.finditer(text):
                 matches.append(
                     LexiconMatch(
@@ -67,7 +69,9 @@ class LexiconChecker:
         all_matches: list[LexiconMatch] = []
 
         for rule in rules:
-            pattern = re.compile(re.escape(rule["wrong_phrase"]), re.IGNORECASE)
+            pattern = re.compile(
+                r'\b' + re.escape(rule["wrong_phrase"]) + r'\b', re.IGNORECASE
+            )
             m = pattern.search(corrected)
             if m:
                 corrected = corrected[:m.start()] + rule["correct_phrase"] + corrected[m.end():]
