@@ -238,6 +238,13 @@ class CorrectionEngine:
         text, pesos_corrections = self._post_pesos_text(text)
         all_corrections.extend(pesos_corrections)
 
+        # --- Post-processing: K-shorthand → ₱ thousands (2K → ₱2,000) ---
+        text, k_corrections = self._post_k_shorthand(text)
+        all_corrections.extend(k_corrections)
+
+        # --- Post-processing: comma-format all ₱ amounts (₱24500 → ₱24,500) ---
+        text = self._post_format_peso_amounts(text)
+
         # --- Post-processing: double-word deduplication ---
         text, dedup_corrections = self._post_dedup_words(text)
         all_corrections.extend(dedup_corrections)
@@ -481,6 +488,43 @@ class CorrectionEngine:
                 )
             )
         return new_text, details
+
+    # Regex: "2K" / "50k" / "2 K" → ₱2,000 / ₱50,000
+    _K_SHORTHAND_RE = re.compile(
+        r'\b(\d+)\s*[Kk]\b'
+    )
+
+    @staticmethod
+    def _k_repl(m: re.Match) -> str:
+        num = int(m.group(1)) * 1000
+        return f"₱{num:,}"
+
+    def _post_k_shorthand(self, text: str) -> tuple[str, list[CorrectionDetail]]:
+        """Convert K shorthand amounts to ₱ thousands (e.g. 2K → ₱2,000)."""
+        details: list[CorrectionDetail] = []
+        new_text = self._K_SHORTHAND_RE.sub(self._k_repl, text)
+        if new_text != text:
+            details.append(
+                CorrectionDetail(
+                    original="K shorthand amount",
+                    corrected="₱ thousands format",
+                    source=CorrectionSource.LEXICON,
+                )
+            )
+        return new_text, details
+
+    # Regex: ₱ followed by digits (with optional decimals) that lack commas
+    _PESO_AMOUNT_RE = re.compile(r'₱(\d+)(\.\d+)?')
+
+    @staticmethod
+    def _format_peso_repl(m: re.Match) -> str:
+        whole = int(m.group(1))
+        decimals = m.group(2) or ""
+        return f"₱{whole:,}{decimals}"
+
+    def _post_format_peso_amounts(self, text: str) -> str:
+        """Add comma separators to all ₱ amounts (₱24500.00 → ₱24,500.00)."""
+        return self._PESO_AMOUNT_RE.sub(self._format_peso_repl, text)
 
     # Regex: consecutive duplicate words (case-insensitive)
     _DOUBLE_WORD_RE = re.compile(

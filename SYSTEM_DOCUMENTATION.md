@@ -12,7 +12,7 @@ When you upload an audio file, the system:
 2. **Extracts** per-word confidence scores and segment timestamps
 3. **Detects** the domain context (Banking, Collections, Verification) using Semantic Anchors
 4. **Corrects** the transcript through 3 sequential layers
-5. **Post-processes** (currency normalization, double-word dedup)
+5. **Post-processes** (currency normalization, K-shorthand expansion, double-word dedup)
 6. **Learns** from each correction to improve future results
 
 ---
@@ -188,6 +188,8 @@ Converts spoken numbers and peso amounts into `₱` format:
 3. **Redundant "centavos" removal** → `₱34,847.72 centavos` → `₱34,847.72` (the decimals already represent centavos)
 4. **Symbol normalization** → `P5,000` or `$5,000` → `₱5,000`
 5. **Bare amounts** → standalone comma-formatted amounts get `₱` prepended
+6. **K-shorthand** → `2K` / `50k` / `2 K` → `₱2,000` / `₱50,000` (digit followed by K/k, word-boundary safe — "OK" is not affected)
+7. **Comma formatting** → All `₱` amounts auto-formatted with comma separators (₱24500 → ₱24,500). Idempotent — already-formatted amounts are not affected.
 
 ### Double-Word Deduplication
 Removes accidental repeated words like "settle settle" → "settle". Whisper occasionally stutters on word boundaries.
@@ -499,6 +501,7 @@ Groq Whisper API (whisper-large-v3-turbo)
 │         Post-Processing                 │                                  │
 │  • "X pesos and Y centavos" → ₱X.YY    │                                  │
 │  • Currency symbol normalize (P/$→₱)    │                                  │
+│  • K-shorthand → ₱ thousands (2K→₱2,000)│                                  │
 │  • Double-word dedup                    │                                  │
 └─────────────────────────────────────────┘                                  │
     │                                                                        │
