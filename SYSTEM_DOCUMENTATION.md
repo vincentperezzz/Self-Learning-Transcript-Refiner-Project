@@ -412,6 +412,115 @@ All corrections (from any source) are logged with occurrence counts. This data h
 
 ---
 
+## Defensive Mechanisms (3-Layer Defense)
+
+The following safety mechanisms prevent catastrophic auto-learning failures (e.g., learning `you → po` which would corrupt every "you" in future transcripts).
+
+### Defense 1: Stopword Guard (Gate 0 — Auto-Learning)
+
+**Location:** `_auto_add_lexicon_rule()` in `correction_engine.py`
+
+A hardcoded set of **common English/Filipino stopwords** that should NEVER be auto-learned as single-word replacements:
+
+```python
+_STOPWORDS = frozenset({
+    # English pronouns, verbs, articles, conjunctions
+    "i", "me", "you", "your", "he", "she", "it", "we", "they", "is", "am", "are",
+    "was", "were", "be", "do", "did", "has", "had", "have", "will", "would", ...
+
+    # Filipino particles / common words
+    "po", "ho", "ko", "mo", "ka", "na", "ba", "pa", "naman", "lang", "nga", ...
+})
+```
+
+**Logic:** If `wrong_phrase` is a single word AND in the stopword set → **reject and log** why:
+```
+Stopword guard prevented auto-learn: 'you' → 'po'
+```
+
+This alone would have prevented the "you → po" disaster.
+
+### Defense 2: Anchor Mode Inheritance (Auto-Learned Rules)
+
+**Location:** `_auto_add_lexicon_rule()` in `correction_engine.py`
+
+When Gemini auto-learns a correction, the rule inherits the **segment's anchor_mode** (the detected call context at that position in the transcript).
+
+**Before:** Rules were stored with `anchor_mode = NULL` (any context) — dangerous because a greeting-context correction could pollute billing segments.
+
+**After:** Rules are stored with the segment's `anchor_mode` (e.g., `account_status`, `greeting`, `closing`), so they only apply in matching contexts.
+
+**Example:**
+- Segment detected as `account_status`: "minimum amount, you" in billing context
+- Gemini corrects: `you → due`
+- Rule stored: `minimum amount, you → minimum amount due` with `anchor_mode = account_status`
+- Future segments classified as `greeting` won't have this rule applied
+
+### Defense 3: Short-Word Lexicon Guard (L1 Application)
+
+**Location:** `check()` and `apply()` methods in `lexicon.py`
+
+When applying lexicon rules in L1, very short single-word rules (≤3 characters) get additional scrutiny:
+
+| Rule Characteristics | Behavior |
+|---------------------|----------|
+| Single word ≤3 chars, `anchor_mode = NULL` | **SKIPPED** (too dangerous without context) |
+| Single word ≤3 chars, has `anchor_mode` | **Applied only** when segment's anchor_mode matches |
+| Multi-word OR >3 chars | Normal application |
+
+This prevents rules like `you → po` from applying universally even if they escape the stopword guard.
+
+### Defense 4: L1 Lexicon Regex Punctuation Fix
+
+**Location:** `_build_lexicon_pattern()` helper in `lexicon.py`
+
+**Problem:** Lexicon patterns used `\bWRONG_PHRASE\b` with word boundaries on both sides. This failed when phrases ended with punctuation (e.g., `minimum amount, you.`), because `\b` expects a word boundary after a non-word character.
+
+**Fix:** Word boundaries are now intelligent:
+- Leading `\b` only if phrase starts with a word character (letter/digit/underscore)
+- Trailing `\b` only if phrase ends with a word character
+
+```python
+# Old (broken for punctuation):
+pattern = r'\b' + re.escape(wrong) + r'\b'
+
+# New (handles punctuation):
+leading_boundary = r'\b' if wrong[0].isalnum() else ''
+trailing_boundary = r'\b' if wrong[-1].isalnum() else ''
+pattern = leading_boundary + re.escape(wrong) + trailing_boundary
+```
+
+### Defense 5: N-Gram Negative Ingestion (Corpus Cleaning)
+
+**Location:** `apply_correction_feedback()` in `ngram_auditor.py`, called from `correct_segment` endpoint in `routes.py`
+
+**Problem:** The N-gram corpus can be "polluted" when uncorrected Whisper errors pass through all layers and get ingested. Example: `(minimum, amount, you)` gets frequency > 0 from bad transcripts, then future corrections are blocked.
+
+**Solution:** When a human uses "Correct with Gemini" to fix text:
+1. **Penalize** trigrams from the original (incorrect) text: frequency reduced by 5
+2. **Reward** trigrams from the corrected text: frequency increased by 3
+
+This actively "cleans" the corpus over time as humans correct errors.
+
+**Example:**
+- Original: "minimum amount, you"
+- Corrected: "minimum amount due"
+- Penalized trigram: `(minimum, amount, you)` → freq reduced by 5
+- Rewarded trigram: `(minimum, amount, due)` → freq increased by 3
+
+### Defense 6: Gemini API Error Handling
+
+**Location:** `correct_segment_with_instruction()` in `gemini_corrector.py`, `correct_segment` endpoint in `routes.py`, frontend `api.ts`
+
+**Problem:** When Gemini API fails (rate limit, timeout, etc.), the system silently returned unchanged text with no indication to the user.
+
+**Fix:** 
+- Backend returns HTTP 503 with descriptive error message
+- Frontend parses JSON error response and displays the message to the user
+- Specific handling for 429 (rate limit): "Gemini API rate limit exceeded. Please wait a few minutes and try again."
+
+---
+
 ## UI Guide
 
 ### Dashboard
