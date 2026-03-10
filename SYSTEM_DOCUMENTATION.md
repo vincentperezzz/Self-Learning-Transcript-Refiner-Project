@@ -12,7 +12,7 @@ When you upload an audio file, the system:
 2. **Extracts** per-word confidence scores and segment timestamps
 3. **Detects** the domain context (Banking, Collections, Verification) using Semantic Anchors
 4. **Corrects** the transcript through 3 sequential layers
-5. **Post-processes** (currency normalization, K-shorthand expansion, double-word dedup)
+5. **Post-processes** (currency normalization, K-shorthand expansion, email formatting, double-word dedup)
 6. **Learns** from each correction to improve future results
 
 ---
@@ -194,8 +194,26 @@ Converts spoken numbers and peso amounts into `₱` format:
 ### Double-Word Deduplication
 Removes accidental repeated words like "settle settle" → "settle". Whisper occasionally stutters on word boundaries.
 
-### Email Normalizer
-Whisper often transcribes the `@` symbol as the word "at". The email normalizer pattern-matches `"word at domain.com"` → `"word@domain.com"` using a regex that requires a valid domain suffix (`.com`, `.ph`, etc.).
+### Email Formatter
+Assembles email addresses from common Whisper mishearing patterns. Unlike the currency normalizer (which handles known formats), the email formatter handles **any email** — even ones the system has never seen before.
+
+**Pattern Detection (3 passes):**
+1. **Known misheard domains** → `user at it mail dot com` → `user@gmail.com` (handles: gmail, yahoo, hotmail, outlook)
+2. **Single-word domains** → `spm at spmadridlaw dot com` → `spm@spmadridlaw.com`
+3. **"at" as word** → `user at domain.com` → `user@domain.com`
+4. **Dot instead of @** → `spm.spmadridlaw.com` → `spm@spmadridlaw.com`
+
+**Domain correction** (common Whisper phonetic confusions):
+- `it mail` / `g mail` / `gemail` → `gmail`
+- `ya who` / `ya hoo` → `yahoo`
+- `hot mail` / `hotmale` → `hotmail`
+- `out look` / `outluk` → `outlook`
+
+**TLD normalization** (spoken → actual):
+- `dot com` / `dotcom` / `dot calm` → `.com`
+- `dot ph` → `.ph`  |  `dot net` → `.net`  |  `dot org` → `.org`
+
+**Why not lexicon?** Lexicon only catches emails it has explicit rules for. A brand-new email like `john at gmail dot com` would pass through uncorrected. The formatter handles ALL email patterns generically. Semantic domain corrections (e.g., `spmadridlo` → `spmadridlaw`) are left to Gemini, which auto-learns them as probationary lexicon rules.
 
 ---
 
@@ -502,6 +520,7 @@ Groq Whisper API (whisper-large-v3-turbo)
 │  • "X pesos and Y centavos" → ₱X.YY    │                                  │
 │  • Currency symbol normalize (P/$→₱)    │                                  │
 │  • K-shorthand → ₱ thousands (2K→₱2,000)│                                  │
+│  • Email formatter (at→@, dot com→.com) │                                  │
 │  • Double-word dedup                    │                                  │
 └─────────────────────────────────────────┘                                  │
     │                                                                        │

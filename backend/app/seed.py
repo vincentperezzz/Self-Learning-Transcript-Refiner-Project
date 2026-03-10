@@ -24,19 +24,11 @@ def seed_lexicon() -> int:
         ("Ana D. Guzman", "Ana de Guzman", "agent name variant", None),
         ("Ana Deguzman", "Ana de Guzman", "agent name variant", None),
         ("set up the minimum amount", "settle the minimum amount", "verb confusion", "account_status"),
-        # "minimum amount due" corrections handled by N-gram (context-aware):
-        # N-gram trigram (minimum, amount, due) has freq=2559, so it naturally corrects
-        # "dew/doo" → "due" while leaving "minimum amount lang" untouched.
         ("magaroon", "magkaroon", "spelling error", None),
         ("may settle", "ma-settle", "word boundary", "negotiation"),
         ("Be encouraged", "We encourage you", "phrasing error", None),
         ("Ms. Marina", "Ms. Marie", "name misheard", None),
         ("record deadline", "recorded line", "phonetic confusion", "consent_to_record"),
-        ("spm.spmadridlaw.com", "spm@spmadridlaw.com", "email @ misheard as dot", None),
-        ("SPM at SPMadridLaw.com", "spm@spmadridlaw.com", "email dictation", None),
-        ("SPM at SPMadridLaw dot com", "spm@spmadridlaw.com", "email dictation", None),
-        ("spm at spmadridlo.com", "spm@spmadridlaw.com", "email: spmadridlo misheard + @ as at", None),
-        ("spm at spmadridlo dot com", "spm@spmadridlaw.com", "email: spmadridlo misheard + @ as at", None),
         ("1delacruz@spmadridlaw.com", "jdelacruz@spmadridlaw.com", "email initial misheard", None),
         ("wandelacruz@spmadridlaw.com", "jdelacruz@spmadridlaw.com", "email name misheard", None),
         # Double-word corrections (Whisper repetition artifacts)

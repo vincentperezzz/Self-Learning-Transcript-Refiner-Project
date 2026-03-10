@@ -249,8 +249,8 @@ class CorrectionEngine:
         text, dedup_corrections = self._post_dedup_words(text)
         all_corrections.extend(dedup_corrections)
 
-        # --- Post-processing: email normalizer ("word at word.com" → "word@word.com") ---
-        text, email_corrections = self._post_email_normalize(text)
+        # --- Post-processing: email formatter (structural assembly) ---
+        text, email_corrections = self._post_email_format(text)
         all_corrections.extend(email_corrections)
 
         # Log every correction for the self-learning loop
@@ -547,23 +547,137 @@ class CorrectionEngine:
             )
         return new_text, details
 
-    # Regex: "word at word.com" or "word at word.com." → "word@word.com"
-    # Whisper often transcribes the @ symbol as the word "at"
-    _EMAIL_AT_RE = re.compile(
+    # ----------------------------------------------------------------
+    # Email Formatter — structural assembly of misheard email addresses
+    # ----------------------------------------------------------------
+
+    # Misheard domain names (Whisper phonetic confusions)
+    _DOMAIN_FIXES: dict[str, str] = {
+        "it mail": "gmail",
+        "itmail": "gmail",
+        "g mail": "gmail",
+        "gee mail": "gmail",
+        "gemail": "gmail",
+        "ya who": "yahoo",
+        "yahooo": "yahoo",
+        "ya hoo": "yahoo",
+        "hot mail": "hotmail",
+        "hotmale": "hotmail",
+        "hot male": "hotmail",
+        "out look": "outlook",
+        "outluk": "outlook",
+    }
+
+    # TLD normalizations (spoken → actual)
+    _TLD_FIXES: dict[str, str] = {
+        "dot com": ".com",
+        "dotcom": ".com",
+        "dot calm": ".com",
+        "dot ph": ".ph",
+        "dot net": ".net",
+        "dot co": ".co",
+        "dot org": ".org",
+        "dot edu": ".edu",
+        "dot gov": ".gov",
+    }
+
+    # Build a single TLD pattern: "dot com|dotcom|dot calm|dot ph|..."
+    _TLD_PATTERN = "|".join(re.escape(k) for k in sorted(_TLD_FIXES.keys(), key=len, reverse=True))
+
+    # Build a domain fix pattern: "it mail|itmail|g mail|..."
+    _DOMAIN_PATTERN = "|".join(re.escape(k) for k in sorted(_DOMAIN_FIXES.keys(), key=len, reverse=True))
+
+    # Pattern 1a: "user at KNOWN_MISHEARD_DOMAIN dot com" (e.g. "john at it mail dot com")
+    _EMAIL_KNOWN_DOMAIN_RE = re.compile(
+        r'\b([a-zA-Z0-9._-]+)\s+at\s+'
+        r'(' + _DOMAIN_PATTERN + r')'
+        r'\s+(' + _TLD_PATTERN + r')\b',
+        re.IGNORECASE,
+    )
+
+    # Pattern 1b: "user at singledomain dot com" (e.g. "spm at spmadridlaw dot com")
+    _EMAIL_SINGLE_DOMAIN_RE = re.compile(
+        r'\b([a-zA-Z0-9._-]+)\s+at\s+'
+        r'([a-zA-Z0-9._-]+)'                           # single word domain
+        r'\s+(' + _TLD_PATTERN + r')\b',
+        re.IGNORECASE,
+    )
+
+    # Pattern 2: "user at domain.com"  (at as word, TLD as symbol)
+    _EMAIL_AT_WORD_RE = re.compile(
         r'\b([a-zA-Z0-9._-]+)\s+at\s+([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b',
         re.IGNORECASE,
     )
 
-    def _post_email_normalize(self, text: str) -> tuple[str, list[CorrectionDetail]]:
-        """Convert 'word at domain.com' → 'word@domain.com' when it looks like email."""
+    # Pattern 3: "user.domain.com"  (Whisper put dot instead of @, e.g. spm.spmadridlaw.com)
+    # Only matches when the first part looks like a username (short) and rest is a real domain
+    _EMAIL_DOT_FOR_AT_RE = re.compile(
+        r'\b([a-zA-Z0-9_-]+)\.([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b',
+    )
+
+    def _fix_domain(self, domain: str) -> str:
+        """Fix misheard domain names (e.g. 'it mail' → 'gmail')."""
+        lower = domain.lower().strip()
+        return self._DOMAIN_FIXES.get(lower, domain.replace(" ", ""))
+
+    def _fix_tld(self, spoken_tld: str) -> str:
+        """Convert spoken TLD to actual (e.g. 'dot com' → '.com')."""
+        return self._TLD_FIXES.get(spoken_tld.lower().strip(), spoken_tld)
+
+    def _post_email_format(self, text: str) -> tuple[str, list[CorrectionDetail]]:
+        """
+        Assemble email addresses from common Whisper mishearing patterns.
+
+        Handles:
+        - "user at domain dot com" → user@domain.com
+        - "user at gmail.com" → user@gmail.com
+        - "spm.spmadridlaw.com" → spm@spmadridlaw.com
+        - "user at it mail dot com" → user@gmail.com
+        """
         details: list[CorrectionDetail] = []
-        new_text = self._EMAIL_AT_RE.sub(r'\1@\2', text)
-        if new_text != text:
+        original = text
+
+        # Pass 1a: Known misheard domains — "user at it mail dot com"
+        def _spoken_repl(m: re.Match) -> str:
+            user = m.group(1)
+            domain_raw = m.group(2)
+            tld_spoken = m.group(3)
+            domain = self._fix_domain(domain_raw)
+            tld = self._fix_tld(tld_spoken)
+            return f"{user}@{domain}{tld}"
+
+        text = self._EMAIL_KNOWN_DOMAIN_RE.sub(_spoken_repl, text)
+
+        # Pass 1b: Single-word domains — "spm at spmadridlaw dot com"
+        def _single_domain_repl(m: re.Match) -> str:
+            user = m.group(1)
+            domain = m.group(2)
+            tld_spoken = m.group(3)
+            tld = self._fix_tld(tld_spoken)
+            return f"{user}@{domain}{tld}"
+
+        text = self._EMAIL_SINGLE_DOMAIN_RE.sub(_single_domain_repl, text)
+
+        # Pass 2: "user at domain.com" (at as word, TLD already a symbol)
+        text = self._EMAIL_AT_WORD_RE.sub(r'\1@\2', text)
+
+        # Pass 3: "user.domain.com" (dot instead of @)
+        # Only apply if it looks like an email (username part is short-ish, ≤20 chars)
+        def _dot_at_repl(m: re.Match) -> str:
+            user = m.group(1)
+            domain = m.group(2)
+            if len(user) <= 20:
+                return f"{user}@{domain}"
+            return m.group(0)  # too long — probably not an email
+
+        text = self._EMAIL_DOT_FOR_AT_RE.sub(_dot_at_repl, text)
+
+        if text != original:
             details.append(
                 CorrectionDetail(
-                    original="email 'at' as word",
-                    corrected="@ symbol",
+                    original="misheard email address",
+                    corrected="email formatted",
                     source=CorrectionSource.LEXICON,
                 )
             )
-        return new_text, details
+        return text, details
