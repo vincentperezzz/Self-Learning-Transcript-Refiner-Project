@@ -34,6 +34,7 @@ export interface RefinedSegment {
   end: number;
   original_text: string;
   refined_text: string;
+  speaker?: "agent" | "client" | "mixed";
   corrections: CorrectionDetail[];
   anchor_mode?: string;
   low_confidence_words: FlaggedWord[];

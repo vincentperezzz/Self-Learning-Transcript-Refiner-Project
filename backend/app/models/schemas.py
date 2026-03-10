@@ -57,6 +57,7 @@ class TranscriptSegment(BaseModel):
     start: float = Field(..., description="Start time in seconds")
     end: float = Field(..., description="End time in seconds")
     text: str = Field(..., description="Raw transcription text")
+    speaker: Optional[str] = Field(None, description="Speaker: agent, client, or mixed")
     confidence: Optional[float] = Field(None, ge=0.0, le=1.0, description="Segment-level avg confidence")
     words: Optional[list[WordInfo]] = Field(None, description="Per-word timestamps and confidence from Whisper")
 
@@ -87,6 +88,7 @@ class RefinedSegment(BaseModel):
     end: float
     original_text: str
     refined_text: str
+    speaker: Optional[str] = Field(None, description="Speaker: agent, client, or mixed")
     corrections: list[CorrectionDetail] = []
     anchor_mode: Optional[AnchorMode] = None
     low_confidence_words: list[FlaggedWord] = Field(

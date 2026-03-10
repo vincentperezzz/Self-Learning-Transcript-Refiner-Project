@@ -385,16 +385,39 @@ class SemanticAnchorManager:
                     0, votes[AnchorMode.PTP_COMMITMENT] - 1
                 )
 
-        # Step 5: Detect ties and escalate to Gemini if needed
+        # Step 5: Detect ties and resolve
         sorted_votes = sorted(votes.items(), key=lambda x: x[1], reverse=True)
         if len(sorted_votes) >= 2 and sorted_votes[0][1] == sorted_votes[1][1]:
-            # Tie detected — try Gemini escalation
+            # Tie detected — use position-aware local fallback (no API call)
             tied_modes = [m for m, v in sorted_votes if v == sorted_votes[0][1]]
-            gemini_result = _gemini_classify_segment(
-                segment_text, previous_modes[-1] if previous_modes else None, tied_modes
-            )
-            if gemini_result is not None:
-                return gemini_result
+            
+            # Smart local tie-breaker based on conversation position
+            if total_segments > 0:
+                position = segment_index / total_segments
+                # Opening zone: prefer greeting/intro/consent
+                if position < 0.15:
+                    for prefer in [AnchorMode.GREETING, AnchorMode.INTRODUCTION, AnchorMode.CONSENT_TO_RECORD]:
+                        if prefer in tied_modes:
+                            return prefer
+                # Closing zone: prefer closing/recap
+                elif position > 0.85:
+                    for prefer in [AnchorMode.CLOSING, AnchorMode.RECAP]:
+                        if prefer in tied_modes:
+                            return prefer
+                # Middle zone: prefer negotiation/account_status/probing
+                else:
+                    for prefer in [AnchorMode.NEGOTIATION, AnchorMode.ACCOUNT_STATUS, AnchorMode.PROBING_RFD]:
+                        if prefer in tied_modes:
+                            return prefer
+            
+            # Final fallback: use previous mode continuity if available
+            if previous_modes:
+                last_mode = previous_modes[-1]
+                if last_mode in tied_modes:
+                    return last_mode
+            
+            # Absolute fallback: first tied mode alphabetically
+            return sorted(tied_modes, key=lambda m: m.value)[0]
 
         # Pick winner
         if votes:

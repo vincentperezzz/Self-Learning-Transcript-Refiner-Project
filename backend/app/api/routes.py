@@ -254,6 +254,7 @@ def _parse_plain_text_transcript(text: str) -> list[TranscriptSegment]:
                 start=float(idx),
                 end=float(idx + 1),
                 text=' '.join(current_text).strip(),
+                speaker=current_speaker,  # Include speaker in segment
                 confidence=1.0,  # Placeholder since no Whisper confidence
                 words=None,
             ))

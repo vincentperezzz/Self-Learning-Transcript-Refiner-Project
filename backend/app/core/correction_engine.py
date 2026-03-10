@@ -345,6 +345,7 @@ class CorrectionEngine:
                 end=seg.end,
                 original_text=seg.text,
                 refined_text=text,
+                speaker=seg.speaker,  # Pass through speaker from input
                 corrections=all_corrections,
                 anchor_mode=mode,
                 low_confidence_words=flagged_words,

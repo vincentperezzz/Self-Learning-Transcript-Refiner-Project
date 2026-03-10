@@ -392,10 +392,27 @@ function SegmentRow({
     }
   }
 
+  // Speaker styling
+  const speakerStyles: Record<string, string> = {
+    agent: "text-sky-400 font-medium",
+    client: "text-emerald-400 font-medium",
+    mixed: "text-yellow-400 font-medium",
+  };
+  const speakerLabels: Record<string, string> = {
+    agent: "Agent",
+    client: "Client",
+    mixed: "Mixed",
+  };
+
   if (view === "transcript") {
     return (
       <div className="py-1.5 px-3 hover:bg-gray-900/40 rounded transition-colors">
         <p className="text-sm text-gray-200 leading-relaxed">
+          {seg.speaker && (
+            <span className={`${speakerStyles[seg.speaker] || "text-gray-400"} mr-1`}>
+              {speakerLabels[seg.speaker] || seg.speaker}:
+            </span>
+          )}
           {seg.refined_text}
         </p>
       </div>
@@ -409,6 +426,11 @@ function SegmentRow({
           {fmt(seg.start)} – {fmt(seg.end)}
         </span>
         <p className="text-sm text-gray-200 leading-relaxed">
+          {seg.speaker && (
+            <span className={`${speakerStyles[seg.speaker] || "text-gray-400"} mr-1`}>
+              {speakerLabels[seg.speaker] || seg.speaker}:
+            </span>
+          )}
           {seg.refined_text}
         </p>
       </div>
@@ -418,11 +440,20 @@ function SegmentRow({
   /* results view */
   return (
     <div className="rounded-lg p-4 mb-2 border bg-gray-800/60 border-gray-700 transition-colors">
-      {/* Timestamp + mode badge */}
+      {/* Timestamp + speaker + mode badge */}
       <div className="flex items-center gap-3 mb-2 text-xs text-gray-500">
         <span className="font-mono">
           {fmt(seg.start)} – {fmt(seg.end)}
         </span>
+        {seg.speaker && (
+          <span className={`px-2 py-0.5 rounded text-[10px] font-medium ${
+            seg.speaker === "agent" ? "bg-sky-900/50 text-sky-300" :
+            seg.speaker === "client" ? "bg-emerald-900/50 text-emerald-300" :
+            "bg-yellow-900/50 text-yellow-300"
+          }`}>
+            {speakerLabels[seg.speaker] || seg.speaker}
+          </span>
+        )}
         {seg.anchor_mode && (
           <span className="relative inline-block">
             <button
