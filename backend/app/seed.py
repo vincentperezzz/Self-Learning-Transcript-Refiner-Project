@@ -24,6 +24,8 @@ def seed_lexicon() -> int:
         ("Ana D. Guzman", "Ana de Guzman", "agent name variant", None),
         ("Ana Deguzman", "Ana de Guzman", "agent name variant", None),
         ("set up the minimum amount", "settle the minimum amount", "verb confusion", "account_status"),
+        ("minimum amount you", "minimum amount due", "Whisper mishearing: you → due", "account_status"),
+        ("minimum amount, you", "minimum amount due", "Whisper mishearing: you → due (with comma)", "account_status"),
         ("magaroon", "magkaroon", "spelling error", None),
         ("may settle", "ma-settle", "word boundary", "negotiation"),
         ("Be encouraged", "We encourage you", "phrasing error", None),
