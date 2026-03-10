@@ -545,99 +545,129 @@ All list pages include client-side pagination via a shared `Pagination` componen
 ## Architecture Summary
 
 ```
-Audio File
-    │
-    ▼
-Groq Whisper API (whisper-large-v3-turbo)
-    │
-    ▼ segments + word-level timestamps + confidence scores
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│    Pass 1: Semantic Anchor Scanner      │
-│   (quick regex hint from DB patterns)   │
-│   Loads patterns from semantic_anchors  │
-│   table via Redis cache (5-min TTL)     │
-└─────────────────────────────────────────┘
-    │
-    ▼ anchor_mode hint per segment (weighted votes only)
-    │
-┌─────────────────────────────────────────┐
-│  Layer 1: Lexicon Lookup (ALL rules)    │  ◄─── new rules added here ──────┐
-│  • Permanent + Probationary rules       │                                  │
-│  • Filtered by anchor_mode              │                                  │
-│  • Longest-match-first ordering         │                                  │
-└─────────────────────────────────────────┘                                  │
-    │                                                                        │
-    ▼                                                                        │
-┌─────────────────────────────────────────┐                                  │
-│    Layer 2: N-Gram + Anchor Analysis    │                                  │
-│  • Trigram frequency from Table B       │                                  │
-│  • Phonetic similarity guard            │                                  │
-│  • Zero-freq check + min-freq threshold │                                  │
-│  • Unknown word detection (zero corpus) │                                  │
-└─────────────────────────────────────────┘                                  │
-    │                      │                                                 │
-    │                      │                                                 │
-    │                      ├──▶ Corrections logged (stays in N-gram domain)  │
-    │                      │                                                 │
-    │                      └──▶ Unknown words flagged ──┐                    │
-    ▼                                                   │                    │
-┌─────────────────────────────────────────┐                                  │
-│         Post-Processing                 │                                  │
-│  • "X pesos and Y centavos" → ₱X.YY    │                                  │
-│  • Currency symbol normalize (P/$→₱)    │                                  │
-│  • K-shorthand → ₱ thousands (2K→₱2,000)│                                  │
-│  • Email formatter (at→@, dot com→.com) │                                  │
-│  • Double-word dedup                    │                                  │
-└─────────────────────────────────────────┘                                  │
-    │                                                                        │
-    ▼                                                                        │
-┌─────────────────────────────────────────┐                                  │
-│   Layer 3: Gemini 2.5 Flash Teacher     │ ◄── unknown words as hints ──────┘
-│  • Analyzes full transcript (1 API call)│                                  │
-│  • Corrects remaining Whisper errors    │                                  │
-│  • Receives applied L1 rules as context │                                  │
-│  • Receives N-gram unknown word flags   │                                  │
-└─────────────────────────────────────────┘                                  │
-    │                      │                                                 │
-    │                      └──▶ Auto-add as PROBATIONARY ─────────────────────┘
-    ▼                           lexicon rule (is_permanent=FALSE)
-    │
-Refined Transcript + Correction Details
-    │
-    ├──▶ Saved to DB (transcription_sessions)
-    ├──▶ Corrections logged (correction_log)
-    │         │
-    │         ▼
-    │    ┌──────────────────────────────────────────┐
-    │    │       Auto-Promotion Check               │
-    │    │  For each probationary rule applied:      │
-    │    │                                          │
-    │    │  correction_log.occurrences >= 3 ?        │
-    │    │     YES ──▶ Promote to PERMANENT          │
-    │    │              (is_permanent = TRUE)         │
-    │    │     NO  ──▶ Stay PROBATIONARY             │
-    │    │              (wait for more sessions)      │
-    │    └──────────────────────────────────────────┘
-    │
-    └──▶ N-grams ingested into Table B (self-learning)
-    │
-    ▼
-┌─────────────────────────────────────────┐
-│   Pass 2: Final Anchor Classification   │
-│  On fully corrected text, per segment:  │
-│                                         │
-│  1. Weighted regex votes (from DB)      │
-│  2. Position zone bias (opening/closing)│
-│  3. Look-back window (last 2 segments)  │
-│  4. Question detection (Filipino + ?)   │
-│  5. Tie → Gemini 2.5 Flash escalation   │
-└─────────────────────────────────────────┘
-    │
-    ▼ final anchor_mode per segment
-    │
-Refined Transcript (with accurate modes)
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         AUDIO INPUT                                      │
+│                    (caller or callee .wav)                                │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│                    GROQ WHISPER API                                       │
+│              (whisper-large-v3-turbo model)                               │
+│                                                                          │
+│  Output: segments[] with word-level timestamps + confidence scores       │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│              PASS 1: SEMANTIC ANCHOR SCANNER                             │
+│                                                                          │
+│  • Loads regex patterns from semantic_anchors table (Redis cached, 5m)   │
+│  • Quick weighted-vote classification per segment                        │
+│  • Output: anchor_mode hint (used to scope L1 + L2 corrections)         │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+          ┌──────────────────┼──────────────────┐
+          │                  │                  │
+          ▼                  │                  │
+┌────────────────────┐       │     ┌────────────────────────────────────┐
+│   LEXICON TABLE    │       │     │       DOMAIN GLOSSARY TABLE        │
+│  (lexicon rules)   │       │     │  (terms per anchor_mode, Redis)    │
+│  Permanent +       │       │     │                                    │
+│  Probationary      │       │     │  Fed to: N-gram + Gemini L3        │
+└────────┬───────────┘       │     └──────────┬─────────────┬───────────┘
+         │                   │                │             │
+         ▼                   │                │             │
+┌──────────────────────────────────────────────────────────────────────────┐
+│            LAYER 1: LEXICON LOOKUP                                       │
+│                                                                          │
+│  • Scoped by anchor_mode from Pass 1                                     │
+│  • Permanent + Probationary rules applied                                │
+│  • Longest-match-first ordering                                          │
+│  • Word-boundary-aware regex matching                                    │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│            LAYER 2: N-GRAM + ANCHOR ANALYSIS                             │
+│                                                                          │
+│  • Trigram frequency lookup from ngram_frequency table                    │
+│  • Strategy 1: Same 2-word prefix, swap word3 (highest freq wins)        │
+│  • Strategy 2: Same 2-word suffix, swap word1 (highest freq wins)        │
+│  • Guards: phonetic similarity check (Levenshtein edit distance)         │
+│  • Domain Glossary bypass: glossary words skip phonetic check ◄──────────┤
+│  • Zero-freq + min-freq threshold flags                                  │
+│  • Unknown words flagged for Gemini                                      │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│            POST-PROCESSING                                               │
+│                                                                          │
+│  Pass 1: "X pesos and Y centavos" → ₱X.YY                               │
+│  Pass 2: Currency symbol normalize (P/$→₱, K-shorthand→₱thousands)      │
+│  Pass 3: Email formatter (at/et→@, dot com→.com, spaces removed)        │
+│  Pass 4: Email lowercase (all email addresses → lowercase)               │
+│  Pass 5: Double-word deduplication                                       │
+│  Pass 6: Comma formatting (spacing normalization)                        │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│            LAYER 3: GEMINI 2.5 FLASH TEACHER                             │
+│                                                                          │
+│  • Single API call with full transcript                                  │
+│  • Receives: L1 applied rules, L2 unknown word flags                     │
+│  • Receives: Domain Glossary terms grouped by anchor_mode ◄──────────────┤
+│  • Receives: anchor_mode per segment for context                         │
+│  • Corrects remaining Whisper errors                                     │
+│  • Output: corrected segments + list of changes                          │
+└───────────┬──────────────────────────────┬───────────────────────────────┘
+            │                              │
+            │     ┌────────────────────────┘
+            │     │
+            │     ▼
+            │   ┌──────────────────────────────────────────────────────────┐
+            │   │     SELF-LEARNING: AUTO-ADD LEXICON RULE                 │
+            │   │                                                          │
+            │   │  For each Gemini correction:                             │
+            │   │  Gate 1: Is it on the blocklist? → SKIP                  │
+            │   │  Gate 2: Already exists in lexicon? → SKIP               │
+            │   │  Pass: INSERT as PROBATIONARY (is_permanent = FALSE)     │
+            │   └──────────────────────────────────────────────────────────┘
+            │
+            ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│            PASS 2: FINAL ANCHOR CLASSIFICATION                           │
+│           (runs on fully corrected text)                                 │
+│                                                                          │
+│  Step 1: Weighted regex votes from DB patterns                           │
+│  Step 2: Position zone bias (opening 15% → greeting, closing 15%)        │
+│  Step 3: Look-back window (last 2 segments for context continuity)       │
+│  Step 4: Question detection (Filipino particles + punctuation)           │
+│  Step 5: Tie-breaker → Gemini 2.5 Flash single-segment classification   │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│            OUTPUT: REFINED TRANSCRIPT                                     │
+│                                                                          │
+│  • Saved to DB (transcription_sessions.result_json)                      │
+│  • All corrections logged to correction_log table                        │
+│  • N-grams from corrected text ingested into ngram_frequency             │
+│  • Final anchor_mode assigned per segment                                │
+└────────────────────────────┬─────────────────────────────────────────────┘
+                             │
+                             ▼
+┌──────────────────────────────────────────────────────────────────────────┐
+│            AUTO-PROMOTION CHECK                                          │
+│                                                                          │
+│  For each probationary lexicon rule used:                                │
+│    correction_log.occurrences >= 3?                                      │
+│       YES → Promote to PERMANENT (is_permanent = TRUE)                   │
+│              + NOT on blocklist (Gate 3)                                  │
+│       NO  → Stay PROBATIONARY (wait for more sessions)                   │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Human Override Flow (Trust Erosion)
