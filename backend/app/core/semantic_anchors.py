@@ -141,7 +141,7 @@ def _gemini_classify_segment(
     Ask Gemini to break a tie between anchor modes.
     Returns the chosen mode, or None if Gemini is unavailable/fails.
     """
-    from app.config import GEMINI_API_KEY
+    from app.config import GEMINI_API_KEY, GEMINI_MODEL
     if not GEMINI_API_KEY:
         return None
 
@@ -161,8 +161,8 @@ def _gemini_classify_segment(
 
     try:
         url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+            f"https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
         )
         resp = httpx.post(
             url,

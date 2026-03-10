@@ -20,14 +20,14 @@ from dataclasses import dataclass
 
 import httpx
 
-from app.config import GEMINI_API_KEY
+from app.config import GEMINI_API_KEY, GEMINI_MODEL
 from app.database import get_db
 
 logger = logging.getLogger(__name__)
 
 GEMINI_API_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-2.5-flash:generateContent"
+    f"https://generativelanguage.googleapis.com/v1beta/models/"
+    f"{GEMINI_MODEL}:generateContent"
 )
 
 SYSTEM_PROMPT = """\
@@ -247,12 +247,20 @@ def correct_transcript_sync(
         logger.warning("GEMINI_API_KEY not set — skipping Gemini correction layer")
         return []
 
-    # Build transcript text for the prompt (include anchor mode if available)
+    # Build transcript text for the prompt (include anchor mode and context if available)
     transcript_lines = []
     for seg in segments:
         mode_tag = f" ({seg['anchor_mode']})" if seg.get("anchor_mode") else ""
+        
+        # Include context if provided (for segment-focused analysis)
+        context_hint = ""
+        if seg.get("context_before"):
+            context_hint = f"\n    Context before: \"{seg['context_before'][:100]}...\""
+        if seg.get("context_after"):
+            context_hint += f"\n    Context after: \"{seg['context_after'][:100]}...\""
+        
         transcript_lines.append(
-            f"[{seg['index']}] [{seg['start']:.1f}s-{seg['end']:.1f}s]{mode_tag} {seg['text']}"
+            f"[{seg['index']}] [{seg['start']:.1f}s-{seg['end']:.1f}s]{mode_tag} {seg['text']}{context_hint}"
         )
     transcript_text = "\n".join(transcript_lines)
 

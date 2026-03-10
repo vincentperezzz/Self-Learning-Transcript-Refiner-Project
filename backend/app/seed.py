@@ -99,6 +99,42 @@ def seed_lexicon() -> int:
         ("amnesia program", "amnesty program", "Whisper error: amnesia → amnesty", None),
         # Sino/Kino confusion
         ("kino", "sino", "Whisper error: kino → sino (Filipino question word)", None),
+        
+        # ── Learned from Gemini corrections (Scam/Phishing calls) ──
+        # Phishing-related errors (common in scam discussion transcripts)
+        ("napising", "na-phish", "Whisper error: phishing attempt misheard", None),
+        ("pasing", "phishing", "Whisper error: phishing misheard", None),
+        ("na-pising", "na-phish", "Whisper error: phishing variant", None),
+        ("naphish", "na-phish", "Whisper hyphenation error", None),
+        ("na phish", "na-phish", "Whisper word boundary error", None),
+        ("napish", "na-phish", "Whisper spelling variant", None),
+        
+        # Bank-related errors
+        ("bansi", "bank", "Whisper error: bank misheard as bansi", None),
+        ("bangko", "bangko", "correct Filipino for bank", None),  # Leave as-is
+        
+        # Common Tagalog word errors
+        ("nasyadong", "masyadong", "Whisper error: masyadong (too much)", None),
+        ("nasyado", "masyado", "Whisper error: masyado variant", None),
+        ("papadalan", "papadalhan", "Whisper error: papadalhan (will be sent)", None),
+        
+        # Settlement/payment phrase errors
+        ("ma-i-settled", "ma-settle", "Whisper error: settle conjugation", "negotiation"),
+        ("na-iscut", "ma-settle", "Whisper error: settle misheard", "negotiation"),
+        ("mai-settle", "ma-settle", "Whisper hyphenation error", "negotiation"),
+        ("masettle", "ma-settle", "Whisper word boundary: ma-settle", "negotiation"),
+        
+        # Agent phrase errors
+        ("Paas ko", "Pa-ask ko", "Whisper error: pa-ask (let me ask)", None),
+        ("pa-as ko", "pa-ask ko", "Whisper error variant", None),
+        
+        # Amount/counting errors
+        ("counting discount", "kaunting discount", "Whisper error: kaunting (small)", "negotiation"),
+        
+        # Scam-related vocabulary
+        ("na-scam", "na-scam", "correct past tense", None),  # Confirm correct
+        ("naskam", "na-scam", "Whisper hyphenation error", None),
+        ("na scam", "na-scam", "Whisper word boundary", None),
     ]
 
     count = 0

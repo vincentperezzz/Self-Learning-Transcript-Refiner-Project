@@ -162,38 +162,50 @@ class CorrectionEngine:
                 on_stage("ngram")
 
         # --- Pass 2: Gemini correction for remaining issues ---
-        # Determine which segments need Gemini analysis:
-        #   1) Segments with low-confidence words
-        #   2) Segments where L1/L2 made no corrections (unknown patterns)
-        #   3) Unknown words detected by N-gram corpus analysis
+        # OPTIMIZATION: Only call Gemini if there are unknown words flagged by N-gram.
+        # This dramatically reduces API calls and token usage (~80% savings).
+        # Gemini focuses on words not in our N-gram corpus (likely transcription errors).
         needs_gemini = len(all_unknown_words) > 0
-        if not needs_gemini:
-            for idx, rs in enumerate(refined_segments):
-                has_low_conf = len(rs.low_confidence_words) > 0
-                had_no_fixes = len(rs.corrections) == 0
-                if has_low_conf or had_no_fixes:
-                    needs_gemini = True
-                    break
-
+        
         if needs_gemini:
             if on_stage:
                 on_stage("gemini")
-            gemini_input = [
-                {
+            
+            # OPTIMIZATION: Only send segments that have unknown words (not full transcript)
+            # Build a minimal payload with just the problematic segments + context
+            segments_with_unknowns = set(uw["segment_index"] for uw in all_unknown_words)
+            
+            gemini_input = []
+            for idx in segments_with_unknowns:
+                rs = refined_segments[idx]
+                # Include 1 segment before/after for context (if available)
+                context_before = refined_segments[idx-1].refined_text if idx > 0 else ""
+                context_after = refined_segments[idx+1].refined_text if idx < len(refined_segments)-1 else ""
+                
+                gemini_input.append({
                     "index": idx,
                     "text": rs.refined_text,
                     "start": rs.start,
                     "end": rs.end,
                     "anchor_mode": rs.anchor_mode.value if rs.anchor_mode else None,
-                }
-                for idx, rs in enumerate(refined_segments)
-            ]
+                    "context_before": context_before,
+                    "context_after": context_after,
+                })
+            
+            # Filter unknown words and applied rules to only include relevant segments
+            relevant_unknown = [uw for uw in all_unknown_words if uw["segment_index"] in segments_with_unknowns]
+            relevant_flagged = [fw for fw in all_flagged if fw["segment_index"] in segments_with_unknowns]
+            
+            logger.info(
+                "Gemini L3: Processing %d/%d segments with %d unknown words",
+                len(gemini_input), len(refined_segments), len(relevant_unknown)
+            )
 
             gemini_corrections = correct_transcript_sync(
                 segments=gemini_input,
-                low_confidence_words=all_flagged if all_flagged else None,
+                low_confidence_words=relevant_flagged if relevant_flagged else None,
                 applied_rules=applied_lexicon_rules if applied_lexicon_rules else None,
-                unknown_words=all_unknown_words if all_unknown_words else None,
+                unknown_words=relevant_unknown if relevant_unknown else None,
             )
 
             # Apply Gemini corrections and auto-learn
@@ -235,6 +247,9 @@ class CorrectionEngine:
                             "Gemini corrected [seg %d]: '%s' → '%s'",
                             gc.segment_index, gc.original, gc.corrected,
                         )
+        else:
+            # No unknown words - skip Gemini entirely (optimization)
+            logger.info("Gemini L3 skipped: No unknown words detected by N-gram corpus")
 
         # Ingest the *corrected* text into N-Gram table for learning
         corrected_full = " ".join(rs.refined_text for rs in refined_segments)

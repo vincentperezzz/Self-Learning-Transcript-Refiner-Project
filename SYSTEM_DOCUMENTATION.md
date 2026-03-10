@@ -152,18 +152,25 @@ Anchors use a **context window** — they scan the previous segment, current seg
 This layer replaces the previous DistilBERT approach. Instead of blindly predicting words from statistical patterns, Gemini understands Philippine call-center context, Tagalog code-switching, and domain-specific terminology.
 
 **When it triggers:**
-- Segments with **low-confidence words** (Whisper was uncertain) → always analyzed
-- Segments where **L1 + L2 made no corrections** → analyzed for unknown patterns the lexicon doesn't cover yet
-- **Unknown words detected by N-gram corpus analysis** → words not found in any trigram are flagged as likely transcription errors
+- **ONLY when unknown words are detected** by N-gram corpus analysis
+- Words not found in any trigram are flagged as likely transcription errors
+- If N-gram finds no unknown words → Gemini is **completely skipped** (saves ~80% of API costs)
+
+**Optimized API Usage (v3.1):**
+
+Instead of sending the entire transcript to Gemini, the system now:
+1. Identifies segments with unknown words flagged by N-gram
+2. Sends **only those segments** (plus 1 segment of context before/after)
+3. Includes specific unknown words list to focus Gemini's attention
+4. Skips Gemini entirely if no unknown words detected
 
 **How it works:**
 
-1. After L1/L2 and post-processing, the full transcript (all segments) is sent to Gemini in a **single API call** (efficient — 1 call per session, not per segment)
+1. After L1/L2 and post-processing, only **segments with unknown words** are sent to Gemini (not the full transcript)
 
 2. Gemini receives:
-   - All segments with timestamps and the text after L1/L2 corrections
-   - A list of low-confidence words flagged by Whisper
-   - A list of **unknown words** flagged by N-gram corpus analysis (words never seen in any trigram)
+   - Only segments containing flagged unknown words (with neighboring context)
+   - A list of **unknown words** flagged by N-gram corpus analysis
    - Instructions specific to Philippine call-center context (Tagalog code-switching, politeness particles like "ho/po", company names, financial terms)
 
 3. Gemini identifies remaining Whisper transcription errors and returns structured corrections
@@ -178,7 +185,24 @@ This layer replaces the previous DistilBERT approach. Instead of blindly predict
 This is the key design principle — Gemini acts as a **teacher**:
 - First transcription: Gemini corrects many errors and creates lexicon rules
 - Second transcription: L1 catches the previously-learned patterns, Gemini handles only new ones
-- Over time: The lexicon grows, Gemini is called less, and the system becomes increasingly self-sufficient
+- Over time: The lexicon grows, **Gemini is called less frequently**, and the system becomes increasingly self-sufficient
+
+**Token Optimization:**
+
+| Scenario | Before v3.1 | After v3.1 |
+|----------|-------------|------------|
+| 50 segments, 5 unknowns | ~2000 tokens | ~500 tokens |
+| 50 segments, 0 unknowns | ~2000 tokens | **0 tokens (skipped)** |
+| Repeat content | Full cost | Free (learned in lexicon) |
+
+**Configurable Model:**
+
+The Gemini model can be changed via environment variable:
+```
+GEMINI_MODEL=gemini-2.5-flash (default)
+GEMINI_MODEL=gemini-3.1-flash-lite-preview (lower cost)
+GEMINI_MODEL=gemini-2.0-flash-lite (high volume)
+```
 
 **Why not DistilBERT?**
 

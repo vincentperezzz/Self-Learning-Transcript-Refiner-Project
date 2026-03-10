@@ -15,6 +15,7 @@ REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 CORRECTION_THRESHOLD = int(os.getenv("CORRECTION_THRESHOLD", "5"))
 LOW_CONFIDENCE_THRESHOLD = float(os.getenv("LOW_CONFIDENCE_THRESHOLD", "0.85"))
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 
 # Groq – Hosted Whisper large-v3-turbo
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
