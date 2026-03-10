@@ -368,6 +368,19 @@ def correct_segment(
                 # Log the correction
                 _logger.log(orig, corr, CorrectionSource.GEMINI)
 
+        # Apply N-gram correction feedback: penalize original, reward corrected
+        # This helps clean the N-gram corpus of patterns from uncorrected Whisper errors
+        try:
+            feedback = NGramAuditor.apply_correction_feedback(original_text, corrected_text)
+            import logging
+            logging.getLogger(__name__).info(
+                "N-gram feedback for segment %d: penalized=%d, rewarded=%d",
+                seg_idx, feedback["penalized"], feedback["rewarded"],
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("N-gram feedback failed: %s", e)
+
         # Persist updated result_json
         total_new = sum(1 for c in changes if c.get("original") and c.get("corrected"))
         with get_db() as conn:

@@ -26,6 +26,28 @@ class LexiconMatch:
     span: tuple[int, int]
 
 
+def _build_lexicon_pattern(wrong_phrase: str) -> re.Pattern:
+    """Build a regex pattern for lexicon matching.
+
+    Uses word boundaries (\b) to avoid substring matches, but intelligently
+    handles punctuation at the start and end of phrases:
+    - Leading \b only if phrase starts with a word character
+    - Trailing \b only if phrase ends with a word character
+
+    This fixes the bug where rules like "minimum amount, you." (ending with
+    punctuation) would fail to match because \b expects a word boundary after
+    a non-word character.
+    """
+    # Check first and last characters for word-boundary eligibility
+    leading_boundary = r'\b' if wrong_phrase and (wrong_phrase[0].isalnum() or wrong_phrase[0] == '_') else ''
+    trailing_boundary = r'\b' if wrong_phrase and (wrong_phrase[-1].isalnum() or wrong_phrase[-1] == '_') else ''
+
+    return re.compile(
+        leading_boundary + re.escape(wrong_phrase) + trailing_boundary,
+        re.IGNORECASE
+    )
+
+
 class LexiconChecker:
     """
     Checks transcript text against all lexicon rules (permanent + probationary).
@@ -54,9 +76,7 @@ class LexiconChecker:
                 if anchor_mode is None or anchor_mode.value != rule_anchor:
                     continue
 
-            pattern = re.compile(
-                r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE
-            )
+            pattern = _build_lexicon_pattern(wrong)
             for m in pattern.finditer(text):
                 matches.append(
                     LexiconMatch(
@@ -101,9 +121,7 @@ class LexiconChecker:
                 if anchor_mode is None or anchor_mode.value != rule_anchor:
                     continue
 
-            pattern = re.compile(
-                r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE
-            )
+            pattern = _build_lexicon_pattern(wrong)
             m = pattern.search(corrected)
             if m:
                 corrected = corrected[:m.start()] + rule["correct_phrase"] + corrected[m.end():]

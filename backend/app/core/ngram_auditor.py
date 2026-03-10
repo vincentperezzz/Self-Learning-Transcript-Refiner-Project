@@ -310,6 +310,93 @@ class NGramAuditor:
         return total
 
     # ------------------------------------------------------------------
+    # Negative Ingestion (learning from human corrections)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def apply_correction_feedback(
+        original_text: str,
+        corrected_text: str,
+        penalty: int = 5,
+        reward: int = 3,
+    ) -> dict:
+        """
+        Apply negative/positive feedback to the N-gram corpus when a human
+        corrects a transcript segment.
+
+        - Trigrams from `original_text` are penalized (frequency reduced)
+        - Trigrams from `corrected_text` are rewarded (frequency increased)
+
+        This helps "clean" the corpus of patterns introduced by uncorrected
+        Whisper errors, while reinforcing correct patterns.
+
+        Args:
+            original_text: The text before human correction
+            corrected_text: The text after human correction
+            penalty: Amount to subtract from original trigram frequencies
+            reward: Amount to add to corrected trigram frequencies
+
+        Returns:
+            dict with counts of trigrams penalized and rewarded
+        """
+        if original_text == corrected_text:
+            return {"penalized": 0, "rewarded": 0}
+
+        original_tokens = NGramAuditor.tokenize(original_text)
+        corrected_tokens = NGramAuditor.tokenize(corrected_text)
+
+        original_trigrams = set(
+            (original_tokens[i], original_tokens[i + 1], original_tokens[i + 2])
+            for i in range(len(original_tokens) - 2)
+        )
+        corrected_trigrams = set(
+            (corrected_tokens[i], corrected_tokens[i + 1], corrected_tokens[i + 2])
+            for i in range(len(corrected_tokens) - 2)
+        )
+
+        # Trigrams ONLY in original (removed by correction) → penalize
+        to_penalize = original_trigrams - corrected_trigrams
+
+        # Trigrams ONLY in corrected (added by correction) → reward
+        to_reward = corrected_trigrams - original_trigrams
+
+        penalized_count = 0
+        rewarded_count = 0
+
+        with get_db() as conn:
+            # Penalize original-only trigrams (reduce frequency, min 0)
+            for w1, w2, w3 in to_penalize:
+                conn.execute(
+                    """
+                    UPDATE ngram_frequency
+                    SET frequency = GREATEST(0, frequency - %s)
+                    WHERE word1 = %s AND word2 = %s AND word3 = %s
+                    """,
+                    (penalty, w1, w2, w3),
+                )
+                penalized_count += 1
+
+            # Reward corrected-only trigrams (increase frequency or insert)
+            for w1, w2, w3 in to_reward:
+                conn.execute(
+                    """
+                    INSERT INTO ngram_frequency (word1, word2, word3, frequency)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT(word1, word2, word3)
+                    DO UPDATE SET frequency = ngram_frequency.frequency + %s
+                    """,
+                    (w1, w2, w3, reward, reward),
+                )
+                rewarded_count += 1
+
+        # Invalidate cache for affected trigrams
+        from app.cache import cache_delete
+        for w1, w2, w3 in to_penalize | to_reward:
+            cache_delete(ngram_cache_key(w1, w2, w3))
+
+        return {"penalized": penalized_count, "rewarded": rewarded_count}
+
+    # ------------------------------------------------------------------
     # Unknown word detection
     # ------------------------------------------------------------------
 
