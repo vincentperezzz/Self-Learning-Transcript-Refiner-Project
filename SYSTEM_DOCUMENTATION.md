@@ -514,18 +514,31 @@ Manage the database-backed semantic anchor patterns that drive intent classifica
 Browse the trigram frequency database with search, pagination, and frequency bar visualization. Shows all stored 3-word sequences sorted by frequency (highest first). Each row displays word1, word2, word3, frequency count, and a proportional bar chart.
 
 ### Self-Learning Page
-Two tabs: **Candidates** and **Log**.
+Displays the full correction log with source filter cards and a corrections table with pagination.
 
-The **Candidates** tab shows corrections that have reached 5+ occurrences. These are tracked for visibility — Gemini corrections auto-add to the lexicon immediately, and N-Gram corrections auto-promote as probationary rules.
-
-The **Log** tab includes source filter cards showing counts by correction source:
+**Source filter cards** show counts by correction source:
 - **All** — total corrections
-- **Lexicon** — corrections from permanent rules (blue badge)
-- **N-Gram** — corrections from trigram analysis (purple badge)
-- **Gemini** — corrections from AI teacher (violet badge)
+- **Lexicon (Known)** — corrections from existing permanent rules (blue badge)
+- **N-Gram (Auto)** — corrections from trigram analysis (purple badge)
+- **Gemini (Auto)** — corrections from AI teacher (violet badge)
+
+**Lexicon Status column** shows the actual promotion state of each correction:
+- **Known Rule** — correction matched an existing permanent lexicon rule
+- **Probationary (X/3)** — auto-learned rule, not yet promoted. X = current occurrences, 3 = promotion threshold
+- **Promoted → Permanent** — auto-learned rule that has been promoted after reaching the threshold
+
+Both Gemini and N-gram corrections start as **probationary** lexicon rules (`is_permanent = FALSE`). After a correction has been applied in 3+ distinct sessions (tracked via `correction_log.occurrences`), it is auto-promoted to permanent. The promotion threshold is returned by the API and displayed dynamically.
 
 ### Account Page
 Change password and manage user accounts (admin only).
+
+### Pagination
+All list pages include client-side pagination via a shared `Pagination` component:
+- **Default page size:** 25 items (configurable per-page: 25 / 50 / 100)
+- **Pages with pagination:** Dashboard, Lexicon, Blocklist, Self-Learning, Anchors (all 3 tabs), N-Gram
+- Search/filter changes automatically reset to page 1
+- Controls: first/prev/page numbers/next/last with ellipsis for large ranges
+- Shows "X–Y of Z" item count
 
 ---
 

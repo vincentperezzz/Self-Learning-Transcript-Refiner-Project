@@ -520,29 +520,40 @@ export default function AnchorsPage() {
                             {anchor.pattern}
                           </code>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-2 shrink-0">
+                          {/* Toggle switch */}
                           <button
                             onClick={() => handleToggle(anchor.id)}
                             title={anchor.is_active ? "Disable" : "Enable"}
-                            className={`px-2 py-1 rounded text-xs ${
-                              anchor.is_active
-                                ? "bg-green-900/30 text-green-400 hover:bg-green-900/50"
-                                : "bg-gray-700 text-gray-500 hover:bg-gray-600"
+                            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                              anchor.is_active ? "bg-green-600" : "bg-gray-600"
                             }`}
                           >
-                            {anchor.is_active ? "ON" : "OFF"}
+                            <span
+                              className={`inline-block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+                                anchor.is_active ? "translate-x-4" : "translate-x-0.5"
+                              }`}
+                            />
                           </button>
+                          {/* Edit */}
                           <button
                             onClick={() => startEdit(anchor)}
-                            className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600"
+                            title="Edit pattern"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-sky-400 hover:bg-sky-900/30 transition-colors"
                           >
-                            Edit
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                            </svg>
                           </button>
+                          {/* Delete */}
                           <button
                             onClick={() => handleDelete(anchor.id)}
-                            className="px-2 py-1 rounded text-xs text-red-400 hover:bg-red-900/30"
+                            title="Delete pattern"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/30 transition-colors"
                           >
-                            ×
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
                           </button>
                         </div>
                       </div>
@@ -764,15 +775,21 @@ export default function AnchorsPage() {
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             onClick={() => startGlossaryEdit(t)}
-                            className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600"
+                            title="Edit term"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-sky-400 hover:bg-sky-900/30 transition-colors"
                           >
-                            Edit
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                              <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                            </svg>
                           </button>
                           <button
                             onClick={() => handleGlossaryDelete(t.id)}
-                            className="px-2 py-1 rounded text-xs text-red-400 hover:bg-red-900/30"
+                            title="Delete term"
+                            className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-900/30 transition-colors"
                           >
-                            ×
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            </svg>
                           </button>
                         </div>
                       </div>
