@@ -34,8 +34,10 @@ from app.models.schemas import (
     CorrectionSource,
     LexiconRule,
     NGramEntry,
+    PlainTextImportRequest,
     RefinementRequest,
     RefinementResponse,
+    TranscriptSegment,
 )
 
 router = APIRouter()
@@ -219,6 +221,156 @@ def refine_transcript(
     _user: dict = Depends(get_current_user),
 ) -> RefinementResponse:
     return _engine.refine(payload)
+
+
+# ===================================================================
+# PLAIN TEXT IMPORT
+# ===================================================================
+
+import re as _re
+
+_SPEAKER_PREFIX_RE = _re.compile(r'^(Agent|Client|Mixed):\s*', _re.IGNORECASE)
+
+
+def _parse_plain_text_transcript(text: str) -> list[TranscriptSegment]:
+    """Parse plain text with Agent:/Client:/Mixed: prefixes into segments.
+
+    Rules:
+    - Lines starting with Agent:/Client:/Mixed: create new segments
+    - Lines without a prefix are appended to the previous segment
+    - Empty lines are ignored
+    - Timestamps are synthetic (0.0 for start, incremented by segment)
+    """
+    lines = text.strip().split('\n')
+    segments: list[TranscriptSegment] = []
+    current_speaker: str | None = None
+    current_text: list[str] = []
+
+    def flush_segment():
+        nonlocal current_speaker, current_text
+        if current_speaker and current_text:
+            idx = len(segments)
+            segments.append(TranscriptSegment(
+                start=float(idx),
+                end=float(idx + 1),
+                text=' '.join(current_text).strip(),
+                confidence=1.0,  # Placeholder since no Whisper confidence
+                words=None,
+            ))
+        current_text = []
+
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        match = _SPEAKER_PREFIX_RE.match(line)
+        if match:
+            # Flush previous segment
+            flush_segment()
+            # Start new segment
+            speaker = match.group(1).lower()
+            current_speaker = speaker
+            rest = line[match.end():]
+            if rest:
+                current_text.append(rest)
+        elif current_speaker:
+            # Continuation of previous segment
+            current_text.append(line)
+        else:
+            # No speaker yet, treat as standalone segment
+            current_speaker = 'mixed'
+            current_text.append(line)
+
+    # Flush final segment
+    flush_segment()
+
+    return segments
+
+
+@router.post("/import-text")
+async def import_plain_text(
+    payload: PlainTextImportRequest,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Import plain text transcript and create a session for it.
+
+    Text format:
+        Agent: Hello, this is calling from SP Madrid.
+        Client: Yes po, I received the letter.
+        Agent: OK po, regarding your outstanding balance...
+
+    Returns session_key for tracking the refinement process.
+    """
+    segments = _parse_plain_text_transcript(payload.text)
+    if not segments:
+        raise HTTPException(status_code=400, detail="No segments found in text")
+
+    # Create session
+    session_key = str(uuid.uuid4())[:12].replace("-", "")
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO transcription_sessions "
+            "(session_key, filename, speaker, status, processing_stage, user_id) "
+            "VALUES (%s, %s, %s, 'processing', 'refinement', %s) "
+            "RETURNING id",
+            (session_key, "text_import.txt", "mixed", user["id"]),
+        )
+        session_id = cur.fetchone()["id"]
+
+    # Process in background (like audio transcription)
+    background_tasks.add_task(
+        _process_text_import,
+        session_id,
+        session_key,
+        segments,
+    )
+
+    return {"session_key": session_key, "status": "processing", "segment_count": len(segments)}
+
+
+def _process_text_import(
+    session_id: int,
+    session_key: str,
+    segments: list[TranscriptSegment],
+):
+    """Background task to refine imported text segments."""
+    try:
+        # Build refinement request
+        request = RefinementRequest(segments=segments, speaker="mixed")
+        result = _engine.refine(request)
+
+        # Save result
+        result_data = {
+            "segments": [seg.model_dump() for seg in result.segments],
+            "total_corrections": result.total_corrections,
+        }
+
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions "
+                "SET status = 'completed', processing_stage = 'done', "
+                "result_json = %s, total_segments = %s, total_corrections = %s, "
+                "completed_at = NOW() "
+                "WHERE id = %s",
+                (
+                    json.dumps(result_data),
+                    len(result.segments),
+                    result.total_corrections,
+                    session_id,
+                ),
+            )
+
+    except Exception as exc:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions "
+                "SET status = 'failed', error_message = %s "
+                "WHERE id = %s",
+                (str(exc)[:500], session_id),
+            )
 
 
 # ===================================================================

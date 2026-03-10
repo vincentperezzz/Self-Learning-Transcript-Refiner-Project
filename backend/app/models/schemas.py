@@ -100,6 +100,25 @@ class RefinementResponse(BaseModel):
     total_corrections: int
 
 
+class PlainTextImportRequest(BaseModel):
+    """Import plain text transcript with speaker labels.
+
+    Text format example:
+        Agent: Good morning, thank you for calling SP Madrid and Associates.
+        Client: Hello, yes po.
+        Mixed: [Both speaking at once]
+
+    Speaker prefixes:
+        - "Agent:" - Agent speaking
+        - "Client:" - Client/borrower speaking
+        - "Mixed:" - Both speakers (overlapping)
+
+    Each line starting with a speaker prefix becomes a segment.
+    Lines without a prefix are appended to the previous segment.
+    """
+    text: str = Field(..., description="Plain text transcript with Agent:/Client:/Mixed: prefixes")
+
+
 # ---------------------------------------------------------------------------
 # Lexicon / N-Gram models
 # ---------------------------------------------------------------------------

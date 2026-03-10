@@ -151,6 +151,14 @@ export async function transcribeAudio(file: File, speaker?: string): Promise<{ s
   return res.json() as Promise<{ session_key: string; status: string }>;
 }
 
+export function importPlainText(text: string): Promise<{ session_key: string; status: string; segment_count: number }> {
+  return request<{ session_key: string; status: string; segment_count: number }>("/import-text", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------

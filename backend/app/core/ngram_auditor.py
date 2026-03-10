@@ -29,6 +29,12 @@ from app.database import get_db
 
 
 # ---------------------------------------------------------------------------
+# Redaction placeholder pattern (e.g., [MONTH], [VALUE], [PERSON], [BANK NAME])
+# ---------------------------------------------------------------------------
+REDACTION_PATTERN = re.compile(r'\[[A-Z][A-Z0-9\s]+\]')
+
+
+# ---------------------------------------------------------------------------
 # Levenshtein distance for phonetic similarity guard
 # ---------------------------------------------------------------------------
 
@@ -116,8 +122,10 @@ class NGramAuditor:
 
     @staticmethod
     def tokenize(text: str) -> list[str]:
-        """Lowercase and split into word tokens."""
-        return re.findall(r"[a-záéíóúñ]+(?:'[a-z]+)?", text.lower())
+        """Lowercase and split into word tokens, excluding redaction placeholders."""
+        # Remove redaction placeholders like [MONTH], [VALUE], [PERSON] before tokenizing
+        clean_text = REDACTION_PATTERN.sub(' ', text)
+        return re.findall(r"[a-záéíóúñ]+(?:'[a-z]+)?", clean_text.lower())
 
     def build_trigrams(self, text: str) -> list[tuple[str, str, str]]:
         """Break *text* into overlapping 3-word windows."""

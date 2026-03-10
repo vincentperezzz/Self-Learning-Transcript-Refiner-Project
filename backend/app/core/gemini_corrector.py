@@ -164,6 +164,8 @@ mangled, financial terms, call-center script phrases, collection-specific termin
 - Words/phrases that appear correct in context — our system handles deduplication
 - NEVER change English pronouns "you", "your", "you're", "yours" to Filipino \
 "po" or "por" — these are VALID English words in code-switched sentences
+- NEVER change redaction placeholders like [MONTH], [VALUE], [PERSON], [ORGANIZATION], \
+[BANK NAME], [PAYMENT MODE] — these are intentional masked values, preserve them exactly
 
 ═══ IMPORTANT CONTEXT ═══
 - "ho/po" are Filipino politeness particles — do NOT change them
@@ -172,6 +174,7 @@ mangled, financial terms, call-center script phrases, collection-specific termin
 - Agent often says compliance phrases like "over the recorded line"
 - Borrower often mentions remittance, allotment, salary as source of funds
 - Common negotiation phrases: "magawan ng paraan", "i-settle", "masettle", "makakapag-settle"
+- Text in [UPPERCASE BRACKETS] are redacted/masked values — leave them unchanged
 
 Respond with EXACTLY a JSON array of correction objects. Each object must have:
 - "segment_index": the 0-based index of the segment
