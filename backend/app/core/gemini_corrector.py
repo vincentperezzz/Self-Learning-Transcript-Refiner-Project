@@ -413,10 +413,11 @@ def correct_segment_with_instruction(
     Send a single segment + human instruction to Gemini for targeted correction.
 
     Returns dict with keys: corrected_text, changes (list of {original, corrected})
+    On API errors, also returns 'error' key with the error message.
     """
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY not set")
-        return {"corrected_text": segment_text, "changes": []}
+        return {"corrected_text": segment_text, "changes": [], "error": "GEMINI_API_KEY not configured"}
 
     prompt = _HUMAN_CORRECT_PROMPT.format(
         segment_text=segment_text,
@@ -457,6 +458,17 @@ def correct_segment_with_instruction(
 
         return result
 
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 429:
+            logger.error("Gemini API rate limit exceeded (429)")
+            return {
+                "corrected_text": segment_text,
+                "changes": [],
+                "error": "Gemini API rate limit exceeded. Please wait a few minutes and try again.",
+            }
+        logger.error("Gemini human-correct HTTP error: %s", e, exc_info=True)
+        return {"corrected_text": segment_text, "changes": [], "error": f"Gemini API error: {e.response.status_code}"}
+
     except Exception as e:
         logger.error("Gemini human-correct error: %s", e, exc_info=True)
-        return {"corrected_text": segment_text, "changes": []}
+        return {"corrected_text": segment_text, "changes": [], "error": str(e)}

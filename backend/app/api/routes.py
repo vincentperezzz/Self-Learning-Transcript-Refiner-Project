@@ -308,6 +308,11 @@ def correct_segment(
 
     # Call Gemini with user instruction
     gemini_result = correct_segment_with_instruction(original_text, instruction)
+
+    # Check for API errors (e.g., rate limit)
+    if "error" in gemini_result:
+        raise HTTPException(status_code=503, detail=gemini_result["error"])
+
     corrected_text = gemini_result.get("corrected_text", original_text)
     changes = gemini_result.get("changes", [])
 
