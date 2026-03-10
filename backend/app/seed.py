@@ -365,7 +365,9 @@ def seed_anchors() -> int:
         ("third_party", "relation_inquiry", r"(relation|relasyon|kamag-?anak).*borrower", 1),
         ("third_party", "best_time_to_call", r"best\s*time\s*(to\s*call|tawag)", 1),
         # ── CLOSING ──
-        ("closing", "closing_greeting", r"(thank\s*you|salamat|maraming\s*salamat).*(good\s*day|nice\s*day|po)", 1),
+        ("closing", "closing_greeting", r"(thank\s*you|salamat|maraming\s*salamat).*(good\s*day|nice\s*day|po)", 2),
+        ("closing", "closing_simple_thanks", r"\b(salamat|thank\s*you|thanks)\b[.,!]?\s*$", 2),  # Standalone at end of segment
+        ("closing", "closing_sige_salamat", r"sige.{0,10}(salamat|thank)", 2),  # "Sige, salamat"
         ("closing", "closing_courtesy", r"(walang\s*anuman|ingat\s*po|anything\s*else|assist\s*with)", 1),
         ("closing", "closing_client_thanks", r"(alright|okay)\s*(thank\s*you|salamat|po)", 1),
         ("closing", "closing_reciprocal", r"(you\s*too|ikaw\s*rin|kayo\s*rin|ingat\s*(din|rin))", 1),

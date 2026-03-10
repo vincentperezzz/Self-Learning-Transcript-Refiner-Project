@@ -519,6 +519,40 @@ This actively "cleans" the corpus over time as humans correct errors.
 - Frontend parses JSON error response and displays the message to the user
 - Specific handling for 429 (rate limit): "Gemini API rate limit exceeded. Please wait a few minutes and try again."
 
+### Defense 7: Redaction Placeholder Handling
+
+**Location:** `REDACTION_PATTERN` in `ngram_auditor.py`, system prompt in `gemini_corrector.py`
+
+**Problem:** Transcripts imported from external systems may contain redacted/masked values like `[MONTH]`, `[VALUE]`, `[PERSON]`, `[ORGANIZATION]`, `[BANK NAME]`, `[PAYMENT MODE]`. These should NOT be flagged as unknown words or "corrected" by any layer.
+
+**Fix:**
+1. **N-gram tokenizer strips redaction placeholders** before analysis:
+   - Pattern: `\[[A-Z][A-Z0-9\s]+\]` (uppercase text in brackets)
+   - These tokens are simply removed before trigram building and unknown word detection
+   - Example: `"Good morning [PERSON], your balance is [VALUE]"` → tokenizes to `["good", "morning", "your", "balance", "is"]`
+
+2. **Gemini system prompt explicitly instructs** preservation:
+   - "NEVER change redaction placeholders like [MONTH], [VALUE], [PERSON]..."
+   - "Text in [UPPERCASE BRACKETS] are redacted/masked values — leave them unchanged"
+
+### Defense 8: Position-Aware Closing Detection
+
+**Location:** `classify_segment()` in `semantic_anchors.py`
+
+**Problem:** Phrases like "thank you" and "salamat" can occur mid-conversation (e.g., "thank you for that information") but shouldn't trigger CLOSING anchor detection unless near the end of the call.
+
+**Fix:** Enhanced position-based logic for CLOSING mode:
+
+| Conversation Zone | Position | CLOSING Behavior |
+|------------------|----------|------------------|
+| Opening | 0-10% | **Suppressed entirely** (votes set to 0) |
+| Middle | 10-80% | **Suppressed if standalone**, reduced weight if competing with other modes |
+| Closing | 80-100% | **Boosted by +3**, classic closing phrases get additional +3 |
+
+Classic closing phrases (boosted in final 20%): "good bye", "have a good day", "take care", "ingat po", "walang anuman"
+
+This ensures "salamat" at segment 5 of 100 won't be classified as CLOSING, but "salamat po, have a good day" at segment 95 of 100 will be.
+
 ---
 
 ## UI Guide
@@ -527,7 +561,34 @@ This actively "cleans" the corpus over time as humans correct errors.
 Shows all past refinement sessions with filename, speaker role, segment count, correction count, and timestamp.
 
 ### Upload Page
-Drag-and-drop or click to upload audio files. Select the speaker role (agent or client). The system transcribes via Groq, corrects via the 3-layer pipeline, and saves the session.
+
+The Upload page supports two input modes:
+
+**Audio Upload Mode (default):**
+- Drag-and-drop or click to upload audio files (WAV, MP3, M4A, FLAC, OGG, WEBM)
+- Select multiple files at once — they process sequentially
+- Choose speaker role (agent or client) before submitting
+- System transcribes via Groq, refines via Lexicon → N-Gram → Gemini pipeline
+
+**Plain Text Import Mode:**
+- Toggle to "Plain Text Import" mode via the button at the top
+- Paste transcript text with speaker labels in the textarea
+- Supports three prefixes:
+  - `Agent:` — Lines spoken by the agent
+  - `Client:` — Lines spoken by the client/borrower
+  - `Mixed:` — Overlapping speech or both speakers
+- Each line starting with a speaker prefix becomes a separate segment
+- Lines without a prefix are appended to the previous segment
+
+**Example plain text format:**
+```
+Agent: Good morning, thank you for calling SP Madrid and Associates.
+Client: Yes po, I received the letter.
+Agent: OK po, regarding your outstanding balance of [VALUE] pesos...
+Client: Opo, kailan po yung due date?
+```
+
+Imported text skips the Whisper transcription step and goes directly through the refinement pipeline (Lexicon → N-Gram → Gemini). Timestamps are synthetic (sequential integers).
 
 ### Session Detail Page
 

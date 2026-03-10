@@ -308,7 +308,7 @@ class SemanticAnchorManager:
 
         Steps:
           1. Regex pattern vote counting (weighted)
-          2. Conversation position zone bias
+          2. Conversation position zone bias (CRITICAL for closing)
           3. Look-back window adjustment
           4. Question detection heuristic
           5. Return winner (or GENERAL if no votes)
@@ -323,18 +323,45 @@ class SemanticAnchorManager:
             return AnchorMode.GENERAL
 
         # Step 2: Conversation position zone bias
-        if total_segments > 0:
-            position_ratio = segment_index / total_segments
-            # Opening zone: first 10%
-            if position_ratio < 0.10:
-                for m in (AnchorMode.GREETING, AnchorMode.INTRODUCTION,
-                          AnchorMode.CONSENT_TO_RECORD, AnchorMode.VERIFICATION):
-                    if m in votes:
-                        votes[m] += 2
-            # Closing zone: last 12%
-            elif position_ratio > 0.88:
-                if AnchorMode.CLOSING in votes:
-                    votes[AnchorMode.CLOSING] += 2
+        # Calculate position ratio
+        position_ratio = segment_index / total_segments if total_segments > 0 else 0.5
+
+        # Opening zone: first 10%
+        if position_ratio < 0.10:
+            for m in (AnchorMode.GREETING, AnchorMode.INTRODUCTION,
+                      AnchorMode.CONSENT_TO_RECORD, AnchorMode.VERIFICATION):
+                if m in votes:
+                    votes[m] += 2
+            # SUPPRESS closing in opening zone (a "thank you" early is NOT closing)
+            if AnchorMode.CLOSING in votes:
+                votes[AnchorMode.CLOSING] = 0
+
+        # Middle zone: 10% - 80%
+        elif position_ratio < 0.80:
+            # SUPPRESS closing in middle zone - "salamat" mid-conversation is gratitude, not closing
+            # Only apply if CLOSING is the ONLY mode detected (standalone thanks)
+            if AnchorMode.CLOSING in votes:
+                # Check if other modes are also present
+                other_votes = {m: v for m, v in votes.items() if m != AnchorMode.CLOSING and v > 0}
+                if other_votes:
+                    # Other modes present — CLOSING competes, reduce its weight
+                    votes[AnchorMode.CLOSING] = max(0, votes[AnchorMode.CLOSING] - 2)
+                else:
+                    # CLOSING is the only mode — suppress it entirely in mid-conversation
+                    votes[AnchorMode.CLOSING] = 0
+
+        # Closing zone: last 20% (expanded from 12% for better detection)
+        elif position_ratio >= 0.80:
+            if AnchorMode.CLOSING in votes:
+                votes[AnchorMode.CLOSING] += 3  # Strong boost in closing zone
+            # Also check for classic closing phrases that should always trigger closing here
+            closing_phrases = re.compile(
+                r"(good\s*(bye|day)|have\s*a\s*(good|nice|great)\s*day|take\s*care|ingat\s*po|"
+                r"for\s*any\s*(concern|question).*reach\s*out|walang\s*anuman)",
+                re.IGNORECASE
+            )
+            if closing_phrases.search(segment_text):
+                votes[AnchorMode.CLOSING] = votes.get(AnchorMode.CLOSING, 0) + 3
 
         # Step 3: Look-back window (reduce repeated mode and contextual bias)
         if previous_modes:
