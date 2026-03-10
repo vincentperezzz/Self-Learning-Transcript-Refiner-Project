@@ -191,6 +191,21 @@ class CorrectionEngine:
         # Check for probationary rules that qualify for auto-promotion
         self._check_promotions()
 
+        # --- Pass 2: Final anchor classification on corrected text ---
+        # Context-aware classification using position zones, look-back, and
+        # question detection. Runs on the fully corrected transcript.
+        total_segs = len(refined_segments)
+        previous_modes: list[AnchorMode] = []
+        for idx, rs in enumerate(refined_segments):
+            final_mode = self.anchor_manager.classify_segment(
+                segment_text=rs.refined_text,
+                segment_index=idx,
+                total_segments=total_segs,
+                previous_modes=previous_modes,
+            )
+            rs.anchor_mode = final_mode
+            previous_modes.append(final_mode)
+
         return RefinementResponse(
             segments=refined_segments,
             total_corrections=total_corrections,

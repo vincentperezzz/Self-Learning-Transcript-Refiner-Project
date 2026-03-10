@@ -1,9 +1,11 @@
 import type {
+  AnchorOverride,
   BlocklistRule,
   HealthResponse,
   LexiconRule,
   NGramEntry,
   RefinementResponse,
+  SemanticAnchor,
   SessionDetail,
   SessionSummary,
   TokenResponse,
@@ -335,4 +337,81 @@ export function getCorrectionLog() {
       last_seen_at: string;
     }[];
   }>("/corrections/log");
+}
+
+// ---------------------------------------------------------------------------
+// Semantic Anchors
+// ---------------------------------------------------------------------------
+
+export function listAnchors(search = "", mode = "") {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (mode) params.set("mode", mode);
+  const qs = params.toString();
+  return request<{ anchors: SemanticAnchor[] }>(`/anchors${qs ? `?${qs}` : ""}`);
+}
+
+export function addAnchor(payload: {
+  mode: string;
+  label: string;
+  pattern: string;
+  weight?: number;
+}) {
+  return request<{ status: string; id: number }>("/anchors", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateAnchor(
+  id: number,
+  payload: {
+    mode: string;
+    label: string;
+    pattern: string;
+    weight?: number;
+    is_active?: boolean;
+  },
+) {
+  return request<{ status: string }>(`/anchors/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteAnchor(id: number) {
+  return request<{ status: string }>(`/anchors/${id}`, { method: "DELETE" });
+}
+
+export function toggleAnchor(id: number) {
+  return request<{ status: string; id: number; is_active: boolean }>(
+    `/anchors/${id}/toggle`,
+    { method: "PATCH" },
+  );
+}
+
+export function overrideSegmentAnchor(
+  sessionKey: string,
+  segmentIndex: number,
+  correctedMode: string,
+) {
+  return request<{
+    status: string;
+    segment_index: number;
+    original_mode: string;
+    corrected_mode: string;
+  }>(`/sessions/${sessionKey}/override-anchor`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      segment_index: segmentIndex,
+      corrected_mode: correctedMode,
+    }),
+  });
+}
+
+export function listAnchorOverrides() {
+  return request<{ overrides: AnchorOverride[] }>("/anchor-overrides");
 }

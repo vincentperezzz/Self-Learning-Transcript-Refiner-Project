@@ -122,11 +122,39 @@ CREATE TABLE IF NOT EXISTS lexicon_blocklist (
     UNIQUE(wrong_phrase, correct_phrase)
 );
 
+-- Semantic Anchor Patterns (DB-backed, manageable via UI)
+CREATE TABLE IF NOT EXISTS semantic_anchors (
+    id          SERIAL PRIMARY KEY,
+    mode        TEXT    NOT NULL,
+    label       TEXT    NOT NULL,
+    pattern     TEXT    NOT NULL,
+    weight      INTEGER NOT NULL DEFAULT 1 CHECK (weight BETWEEN 1 AND 5),
+    is_active   BOOLEAN NOT NULL DEFAULT TRUE,
+    source      TEXT    NOT NULL DEFAULT 'seed',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(mode, label)
+);
+
+-- Anchor Override Log (user or Gemini corrections for learning)
+CREATE TABLE IF NOT EXISTS anchor_overrides (
+    id              SERIAL PRIMARY KEY,
+    session_id      INTEGER REFERENCES transcription_sessions(id) ON DELETE CASCADE,
+    segment_index   INTEGER NOT NULL,
+    segment_text    TEXT    NOT NULL,
+    original_mode   TEXT    NOT NULL,
+    corrected_mode  TEXT    NOT NULL,
+    source          TEXT    NOT NULL DEFAULT 'manual',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS idx_ngram_words ON ngram_frequency(word1, word2, word3);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lexicon_wrong ON lexicon(wrong_phrase);
 CREATE INDEX IF NOT EXISTS idx_correction_log_occ ON correction_log(occurrences);
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON transcription_sessions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_key ON transcription_sessions(session_key);
+CREATE INDEX IF NOT EXISTS idx_anchor_patterns_mode ON semantic_anchors(mode);
+CREATE INDEX IF NOT EXISTS idx_anchor_overrides_session ON anchor_overrides(session_id);
 """
 
 

@@ -31,6 +31,7 @@ class AnchorMode(str, Enum):
     CONSEQUENCES = "consequences"
     PTP_COMMITMENT = "ptp_commitment"
     PAYMENT_CHANNEL = "payment_channel"
+    CONTACT_INFO = "contact_info"
     RECAP = "recap"
     EMPATHY = "empathy"
     OBJECTION_HANDLING = "objection_handling"

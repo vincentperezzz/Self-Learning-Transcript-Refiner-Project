@@ -293,6 +293,106 @@ def seed_ngrams() -> int:
     return total
 
 
+def seed_anchors() -> int:
+    """Seed semantic anchor patterns into the database."""
+    # (mode, label, pattern, weight)
+    anchors = [
+        # ── GREETING ──
+        ("greeting", "greeting", r"(hello|good\s*(morning|afternoon|evening)|kamusta)", 1),
+        # ── INTRODUCTION ──
+        ("introduction", "law_firm_intro", r"(SP|Asti)\s*Madrid\s*(Law\s*Firm|and\s*Associates)", 1),
+        ("introduction", "agent_intro", r"(this\s*is|ako\s*(si|po))\s*\w+.*from", 1),
+        ("introduction", "on_behalf_bank", r"on\s*behalf\s*of\s*Future\s*Bank", 1),
+        ("introduction", "accredited_provider", r"accredited\s*service\s*provider", 1),
+        # ── CONSENT TO RECORD ──
+        ("consent_to_record", "recorded_line", r"over\s*the\s*recorded\s*line", 1),
+        ("consent_to_record", "consent_record", r"(line|call)\s*(will\s*be|is\s*being)\s*recorded", 1),
+        # ── VERIFICATION ──
+        ("verification", "identity_verification", r"(verification\s*purposes|verify\s*your\s*(birthday|identity)|dictate\s*your\s*birthdate)", 1),
+        ("verification", "birthdate_check", r"(birthdate|birthday|tama\s*(ho|po)\s*ba)", 1),
+        ("verification", "date_spoken", r"(january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}[,.]?\s*\d{2,4}", 1),
+        ("verification", "date_numeric", r"\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b", 1),
+        ("verification", "verification_confirmed", r"thank\s*you\s*for\s*(the\s*)?(verification|confirmation)", 1),
+        # ── ACCOUNT STATUS ──
+        ("account_status", "credit_card_account", r"credit\s*card\s*account", 1),
+        ("account_status", "past_due", r"past\s*due", 1),
+        ("account_status", "amount_due", r"(minimum|total)\s*amount\s*due", 1),
+        ("account_status", "outstanding_balance", r"outstanding\s*balance", 1),
+        ("account_status", "suspension_notice", r"subject\s*(for|to)\s*suspension", 1),
+        ("account_status", "daily_interest", r"daily\s*interest", 1),
+        # ── PROBING: RFD ──
+        ("probing_rfd", "rfd_probing", r"(reason|dahilan|bakit).*(delay|hindi.*settle|past\s*due|delinquent|unsettled|napabayaan)", 1),
+        ("probing_rfd", "rfd_inquiry", r"(ano|anong).*(nangyari|problem|issue).*(account|settle|delay|payment)", 1),
+        ("probing_rfd", "rfd_english", r"reason\s*for\s*(the\s*)?(delay|non[- ]?payment|broken\s*promise)", 1),
+        # ── PROBING: SOF ──
+        ("probing_sof", "source_of_funds", r"source\s*of\s*(funds|income)", 1),
+        ("probing_sof", "income_source", r"(remittance|allotment|salary|sweldo|sahod|trabaho|employed|negosyo|business)", 1),
+        ("probing_sof", "capacity_to_pay", r"capacity\s*to\s*pay", 1),
+        # ── NEGOTIATION ──
+        ("negotiation", "settlement_request", r"(settle|settlement|mag-?settle|ma-?settle|i-?settle)\s*(of|the|your|ng|sa)?\s*(account|balance|amount)?", 1),
+        ("negotiation", "pif_offer", r"(pay\s*in\s*full|full\s*payment|PIF)\s*(today|tomorrow|ngayon|bukas)?", 1),
+        ("negotiation", "partial_payment", r"partial\s*(payment|amount|settle)", 1),
+        ("negotiation", "find_solution", r"(magawan|gawan)\s*(ng|ito)\s*paraan", 1),
+        ("negotiation", "can_you_settle", r"(makakapag-?settle|masettle|mababayaran|bayaran)", 1),
+        ("negotiation", "special_offer", r"(discount|amnesty|waiver|promo|installment|restructure)", 1),
+        # ── BENEFITS ──
+        ("benefits", "account_benefit", r"(good\s*standing|maintain.*account|active.*account|keep.*account.*active)", 1),
+        ("benefits", "credit_benefit", r"(credit\s*score|avoid.*impact|maiwasan.*impact)", 1),
+        # ── CONSEQUENCES ──
+        ("consequences", "suspension_warning", r"(suspension|ma-?suspend|tuloy.*suspension|i-?suspend)", 1),
+        ("consequences", "escalation_warning", r"(legal\s*proceedings|case\s*filing|higher\s*department|further\s*collection|escalat)", 1),
+        ("consequences", "avoidance_framing", r"(para\s*maiwasan|to\s*avoid|iwas)", 1),
+        # ── PTP / COMMITMENT TO PAY ──
+        ("ptp_commitment", "ptp_commitment", r"(commitment|promise)\s*to\s*pay", 1),
+        ("ptp_commitment", "ptp_when", r"(kailan|when).*((mag-?bayad|settle|payment)|(babayaran|i-?settle))", 1),
+        ("ptp_commitment", "borrower_agreement", r"(sige(\s*(po|ho))?|will\s*do|babayaran\s*ko|i.?ll\s*(pay|settle|see\s*what))", 1),
+        # ── PAYMENT CHANNEL ──
+        ("payment_channel", "payment_channel", r"(online\s*banking|mobile\s*banking|gcash|bayad\s*center|over\s*the\s*counter|branch)", 1),
+        ("payment_channel", "account_number", r"account\s*number\s*(ending\s*in)?", 1),
+        ("payment_channel", "proof_of_payment", r"(pakisend|send|email).*receipt", 1),
+        # ── RECAP ──
+        ("recap", "recap_arrangement", r"(recap|summarize|i-?summarize|recap\s*natin|napag-?usapan)", 1),
+        # ── EMPATHY ──
+        ("empathy", "empathy_statement", r"(naiintindihan|naintindihan|understand|i\s*understand)\s*(ko\s*po|po|your\s*situation)?", 1),
+        ("empathy", "empathy_difficulty", r"(mahirap|hirap|sorry\s*to\s*hear|I.?m\s*sorry)", 1),
+        # ── OBJECTION HANDLING ──
+        ("objection_handling", "cant_afford", r"(hindi\s*(ko|pa)\s*(kaya|kayang)|can.?t\s*afford|wala.*pera|wala.*pambayad)", 1),
+        ("objection_handling", "delay_request", r"(i-?hold\s*muna|hold\s*muna|hindi\s*pa\s*ngayon|later|mamaya|bukas)", 1),
+        # ── THIRD PARTY CONTACT ──
+        ("third_party", "alternative_number", r"(alternate|alternative|ibang)\s*(number|contact|phone)", 1),
+        ("third_party", "relation_inquiry", r"(relation|relasyon|kamag-?anak).*borrower", 1),
+        ("third_party", "best_time_to_call", r"best\s*time\s*(to\s*call|tawag)", 1),
+        # ── CLOSING ──
+        ("closing", "closing_greeting", r"(thank\s*you|salamat|maraming\s*salamat).*(good\s*day|nice\s*day|po)", 1),
+        ("closing", "closing_courtesy", r"(walang\s*anuman|ingat\s*po|anything\s*else|assist\s*with)", 1),
+        ("closing", "closing_client_thanks", r"(alright|okay)\s*(thank\s*you|salamat|po)", 1),
+        ("closing", "closing_reciprocal", r"(you\s*too|ikaw\s*rin|kayo\s*rin|ingat\s*(din|rin))", 1),
+        ("closing", "closing_farewell", r"(have\s*a\s*(good|nice|great)\s*day|magandang\s*araw)", 1),
+        ("closing", "closing_blessing", r"(god\s*bless|ingat\s*po\s*kayo|take\s*care)", 1),
+        ("closing", "closing_reach_out", r"for\s*any\s*(concern|question|inquiry).*reach\s*out", 1),
+        # ── CONTACT INFO ──
+        ("contact_info", "email_address", r"(email\s*address|email\s*namin|email\s*ko)", 1),
+        ("contact_info", "phone_number", r"(contact\s*number|phone\s*number|cellphone\s*number|mobile\s*number)", 1),
+        ("contact_info", "reference_number", r"(ticket\s*number|reference\s*number|confirmation\s*number)", 1),
+        ("contact_info", "note_taking", r"(pen\s*and\s*paper|take\s*note|take\s*down|jot\s*down|i-?dedictate|dictate)", 1),
+        ("contact_info", "email_detected", r"[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", 1),
+    ]
+
+    count = 0
+    with get_db() as conn:
+        for mode, label, pattern, weight in anchors:
+            conn.execute(
+                """
+                INSERT INTO semantic_anchors (mode, label, pattern, weight, source)
+                VALUES (%s, %s, %s, %s, 'seed')
+                ON CONFLICT (mode, label) DO NOTHING
+                """,
+                (mode, label, pattern, weight),
+            )
+            count += 1
+    return count
+
+
 def main() -> None:
     print("Initialising database...")
     init_db()
@@ -309,6 +409,10 @@ def main() -> None:
     print("Seeding N-Gram Frequencies (Table B)...")
     ngram_count = seed_ngrams()
     print(f"  -> {ngram_count} trigrams processed.")
+
+    print("Seeding Semantic Anchors...")
+    anchor_count = seed_anchors()
+    print(f"  -> {anchor_count} anchor patterns inserted.")
 
     print("Done! Phoenix 3.0 database is ready.")
 

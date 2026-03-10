@@ -99,27 +99,41 @@ Example: "mag-buyid" tokenizes to ["mag", "buyid"]. "buyid" appears in zero trig
 
 **What are Semantic Anchors?**
 
-Semantic Anchors detect the **intent/topic** of each segment using ~40 regex patterns across **18 intent-based modes**:
+Semantic Anchors detect the **intent/topic** of each segment using a **3-tier context-aware classification system**. Anchor patterns are stored in the database (`semantic_anchors` table) and managed via the **Anchors** page in the UI.
+
+**Architecture: Two-Pass Classification**
+
+- **Pass 1 (L2 hint):** During correction (before Gemini), a quick regex scan of raw text provides a rough mode hint for N-gram scoring bias. No context engine — just vote counting.
+- **Pass 2 (final):** After all corrections (L1 + L2 + Post + Gemini), the fully corrected text is classified with the full context engine:
+
+  1. **Weighted regex vote counting** — Each DB pattern has a weight (1-5). Matches accumulate weighted votes per mode.
+  2. **Conversation position zones** — Opening (first 10%): boosts GREETING/INTRODUCTION/VERIFICATION. Closing (last 12%): boosts CLOSING. This fixes "thanks you too" near end of call being misclassified.
+  3. **Look-back window** — Checks previous 2 segment modes. If the same mode dominated, its weight is reduced (conversations move forward).
+  4. **Question detection** — Filipino question particles (`ba`, `ano`, `bakit`, `paano`, `kailan`, `magkano`, `gaano`, `saan`, `sino`, `alin`) and `?` marks boost inquiry/probing modes and reduce PTP. This fixes "Okay, ano ba yan?" being misclassified as PTP.
+  5. **Gemini escalation** — If top 2 modes are tied after steps 1-4, the segment + context is sent to Gemini to break the tie. Only ~5-15% of segments trigger this.
+
+**19 intent-based modes:**
 
 | Mode | Example Triggers |
 |---|---|
-| Greeting | "good morning", "magandang umaga" |
-| Verification | "verification purposes", "dictate your birthdate" |
-| Account_Status | "current balance", "past due amount" |
-| Probing:RFD | "reason for delay", "bakit hindi settle" |
-| Probing:Dispute | "dispute", "hindi ako ang gumamit" |
-| Probing:Hardship | "nawalan ng trabaho", "financial difficulty" |
-| Probing:WTP | "willing to pay", "kailan kayo magbabayad" |
-| Probing:Promise | "promise to pay", "commitment" |
-| Negotiation | "minimum amount due", "restructure" |
-| Payment_Details | "reference number", "payment channel" |
-| Reminder | "payment reminder", "follow up" |
-| Disclosure:Legal | "legal action", "file a case" |
-| Disclosure:Credit | "credit standing", "credit bureau" |
-| Hold | "please hold", "sandali lang" |
-| Transfer | "transfer your call", "supervisor" |
-| Closing | "thank you for calling", "anything else" |
-| Callback | "call you back", "follow up call" |
+| Greeting | "good morning", "kamusta" |
+| Introduction | "SP Madrid Law Firm", "this is ... from" |
+| Consent to Record | "over the recorded line", "call is being recorded" |
+| Verification | "verification purposes", "birthdate", "March 19, 1988", "01/15/1990" |
+| Account Status | "credit card account", "past due", "outstanding balance" |
+| Probing: RFD | "reason for delay", "bakit hindi settle" |
+| Probing: SOF | "source of funds", "salary", "employed" |
+| Negotiation | "settle", "full payment", "partial payment", "discount" |
+| Benefits | "good standing", "credit score" |
+| Consequences | "suspension", "legal proceedings", "escalation" |
+| PTP / Commitment | "commitment to pay", "sige po", "babayaran ko" |
+| Payment Channel | "online banking", "GCash", "account number" |
+| Contact Info | "email address", "contact number", "spm@spmadridlaw.com", "pen and paper" |
+| Recap | "recap natin", "napag-usapan" |
+| Empathy | "naiintindihan ko po", "sorry to hear" |
+| Objection Handling | "hindi ko kaya", "can't afford", "hold muna" |
+| Closing | "thank you", "ingat po kayo", "you too", "have a good day", "god bless" |
+| 3rd Party Contact | "alternate number", "relation to borrower" |
 | General | fallback for unmatched segments |
 
 The detected mode is used to:
@@ -457,6 +471,29 @@ View and manage permanently banned correction pairs. Each entry shows: wrong phr
 - **Add Ban** — manually add a correction pair to the blocklist
 - **Unban** (checkmark) — remove the ban, allowing the system to learn this correction again
 
+### Anchors Page
+Manage the database-backed semantic anchor patterns that drive intent classification. Two tabs:
+
+**Patterns tab:**
+- View all anchor patterns grouped by mode with color-coded badges
+- Search by label or regex pattern
+- Filter by mode
+- Add new patterns (mode, label, regex pattern, weight 1-5)
+- Edit existing patterns
+- Toggle patterns active/inactive (ON/OFF switch)
+- Delete patterns
+- Source badges show origin: seed (blue), manual (green), learned (purple)
+
+**Override Log tab:**
+- Table of all manual anchor mode overrides made by users in Session Detail
+- Shows segment text, original mode → corrected mode, source, filename
+- Used for analytics and future self-learning (identifying systematic misclassifications)
+
+**Anchor Override in Session Detail:**
+- Each segment's anchor badge is now clickable
+- Clicking opens a dropdown of all 19 modes
+- Selecting a mode immediately updates the segment and logs the override to the anchor_overrides table
+
 ### N-Gram Page
 Browse the trigram frequency database with search, pagination, and frequency bar visualization. Shows all stored 3-word sequences sorted by frequency (highest first). Each row displays word1, word2, word3, frequency count, and a proportional bar chart.
 
@@ -488,11 +525,13 @@ Groq Whisper API (whisper-large-v3-turbo)
     │
     ▼
 ┌─────────────────────────────────────────┐
-│         Semantic Anchor Scanner         │
-│   (detects intent: 18 anchor modes)     │
+│    Pass 1: Semantic Anchor Scanner      │
+│   (quick regex hint from DB patterns)   │
+│   Loads patterns from semantic_anchors  │
+│   table via Redis cache (5-min TTL)     │
 └─────────────────────────────────────────┘
     │
-    ▼ anchor_mode per segment
+    ▼ anchor_mode hint per segment (weighted votes only)
     │
 ┌─────────────────────────────────────────┐
 │  Layer 1: Lexicon Lookup (ALL rules)    │  ◄─── new rules added here ──────┐
@@ -554,6 +593,22 @@ Refined Transcript + Correction Details
     │    └──────────────────────────────────────────┘
     │
     └──▶ N-grams ingested into Table B (self-learning)
+    │
+    ▼
+┌─────────────────────────────────────────┐
+│   Pass 2: Final Anchor Classification   │
+│  On fully corrected text, per segment:  │
+│                                         │
+│  1. Weighted regex votes (from DB)      │
+│  2. Position zone bias (opening/closing)│
+│  3. Look-back window (last 2 segments)  │
+│  4. Question detection (Filipino + ?)   │
+│  5. Tie → Gemini 2.5 Flash escalation   │
+└─────────────────────────────────────────┘
+    │
+    ▼ final anchor_mode per segment
+    │
+Refined Transcript (with accurate modes)
 ```
 
 ### Human Override Flow (Trust Erosion)
@@ -586,6 +641,8 @@ Gemini returns corrected text + list of changes
 | `lexicon_blocklist` | Permanently banned correction pairs | wrong_phrase, correct_phrase, reason, banned_by, created_at |
 | `ngram_frequency` | Trigram frequency counts for statistical analysis (Table B) | word1, word2, word3, frequency |
 | `correction_log` | Every correction ever made, for self-learning | original_phrase, corrected_phrase, source, occurrences, promoted |
+| `semantic_anchors` | DB-backed anchor patterns (replaces hardcoded list) | mode, label, pattern (regex), weight (1-5), is_active, source (seed/manual/learned) |
+| `anchor_overrides` | Logs every manual anchor mode override | session_id (FK), segment_index, segment_text, original_mode, corrected_mode, source |
 | `users` | Authentication accounts | username, password_hash, role |
 | `transcription_sessions` | Saved refinement results with full JSON data | session_key, status, processing_stage, result_json, completed_at |
 
@@ -622,6 +679,13 @@ Gemini returns corrected text + list of changes
 | GET | `/api/v1/corrections/candidates` | Get Rule-of-5 promotion candidates |
 | POST | `/api/v1/corrections/promote` | Trigger auto-promotion with Gemini audit |
 | GET | `/api/v1/corrections/log` | Get full correction log |
+| GET | `/api/v1/anchors` | List anchor patterns (search, mode filter) |
+| POST | `/api/v1/anchors` | Add a new anchor pattern |
+| PUT | `/api/v1/anchors/{id}` | Update an anchor pattern |
+| DELETE | `/api/v1/anchors/{id}` | Delete an anchor pattern |
+| PATCH | `/api/v1/anchors/{id}/toggle` | Toggle anchor pattern active/inactive |
+| POST | `/api/v1/sessions/{key}/override-anchor` | Override a segment's anchor mode |
+| GET | `/api/v1/anchor-overrides` | List all anchor override history |
 
 ## Configuration
 

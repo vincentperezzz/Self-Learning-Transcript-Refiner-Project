@@ -111,3 +111,27 @@ export interface BlocklistRule {
   banned_by: string;
   created_at: string;
 }
+
+// Semantic Anchors
+export interface SemanticAnchor {
+  id: number;
+  mode: string;
+  label: string;
+  pattern: string;
+  weight: number;
+  is_active: boolean;
+  source: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Anchor Overrides
+export interface AnchorOverride {
+  id: number;
+  segment_text: string;
+  original_mode: string;
+  corrected_mode: string;
+  source: string;
+  created_at: string;
+  filename: string;
+}

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getSession, downloadSession, correctSegmentWithGemini } from "../api";
+import { getSession, downloadSession, correctSegmentWithGemini, overrideSegmentAnchor } from "../api";
 import type { SessionDetail, RefinedSegment } from "../types";
 
 type ViewMode = "transcript" | "timestamped" | "results";
@@ -25,6 +25,7 @@ const ANCHOR_BADGE: Record<string, string> = {
   consequences: "bg-red-900/50 text-red-300",
   ptp_commitment: "bg-lime-900/50 text-lime-300",
   payment_channel: "bg-teal-900/50 text-teal-300",
+  contact_info: "bg-sky-900/50 text-sky-300",
   recap: "bg-violet-900/50 text-violet-300",
   empathy: "bg-pink-900/50 text-pink-300",
   objection_handling: "bg-rose-900/50 text-rose-300",
@@ -46,6 +47,7 @@ const ANCHOR_LABEL: Record<string, string> = {
   consequences: "Consequences",
   ptp_commitment: "PTP / Commitment",
   payment_channel: "Payment Channel",
+  contact_info: "Contact Info",
   recap: "Recap",
   empathy: "Empathy",
   objection_handling: "Objection Handling",
@@ -362,6 +364,7 @@ function SegmentRow({
   const [instruction, setInstruction] = useState("");
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState("");
+  const [showModeOverride, setShowModeOverride] = useState(false);
 
   const hasFixes = seg.corrections.length > 0;
   const changed = seg.original_text !== seg.refined_text;
@@ -414,10 +417,41 @@ function SegmentRow({
           {fmt(seg.start)} – {fmt(seg.end)}
         </span>
         {seg.anchor_mode && (
-          <span className={`px-2 py-0.5 rounded tracking-wide text-[10px] font-medium ${
-            ANCHOR_BADGE[seg.anchor_mode] ?? "bg-gray-700/50 text-gray-400"
-          }`}>
-            {ANCHOR_LABEL[seg.anchor_mode] ?? seg.anchor_mode}
+          <span className="relative inline-block">
+            <button
+              onClick={() => setShowModeOverride(!showModeOverride)}
+              title="Click to change mode"
+              className={`px-2 py-0.5 rounded tracking-wide text-[10px] font-medium cursor-pointer hover:ring-1 hover:ring-white/20 ${
+                ANCHOR_BADGE[seg.anchor_mode] ?? "bg-gray-700/50 text-gray-400"
+              }`}
+            >
+              {ANCHOR_LABEL[seg.anchor_mode] ?? seg.anchor_mode}
+            </button>
+            {showModeOverride && (
+              <div className="absolute z-50 top-full left-0 mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl py-1 w-48 max-h-60 overflow-y-auto">
+                {Object.entries(ANCHOR_LABEL).map(([mode, label]) => (
+                  <button
+                    key={mode}
+                    onClick={async () => {
+                      setShowModeOverride(false);
+                      if (mode === seg.anchor_mode) return;
+                      try {
+                        await overrideSegmentAnchor(sessionKey, segIndex, mode);
+                        onCorrected();
+                      } catch {}
+                    }}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-gray-700 flex items-center gap-2 ${
+                      mode === seg.anchor_mode ? "text-sky-400 font-medium" : "text-gray-300"
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full shrink-0 ${
+                      ANCHOR_BADGE[mode]?.split(" ")[0] ?? "bg-gray-700"
+                    }`} />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
           </span>
         )}
         {changed && (

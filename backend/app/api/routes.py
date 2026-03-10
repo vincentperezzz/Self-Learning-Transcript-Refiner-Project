@@ -819,6 +819,224 @@ def correction_log(_user: dict = Depends(get_current_user)) -> dict:
 
 
 # ===================================================================
+# SEMANTIC ANCHORS
+# ===================================================================
+
+@router.get("/anchors")
+def list_anchors(
+    search: str = "",
+    mode: str = "",
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Return all semantic anchor patterns."""
+    with get_db() as conn:
+        clauses = []
+        params: list = []
+        if search:
+            clauses.append("(label ILIKE %s OR pattern ILIKE %s)")
+            params.extend([f"%{search}%", f"%{search}%"])
+        if mode:
+            clauses.append("mode = %s")
+            params.append(mode)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        cur = conn.execute(
+            f"SELECT id, mode, label, pattern, weight, is_active, source, created_at, updated_at "
+            f"FROM semantic_anchors {where} ORDER BY mode, label",
+            params,
+        )
+        rows = cur.fetchall()
+    return {"anchors": [dict(r) for r in rows]}
+
+
+@router.post("/anchors", status_code=201)
+def add_anchor(
+    payload: dict,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Add a new semantic anchor pattern."""
+    mode = payload.get("mode", "").strip()
+    label = payload.get("label", "").strip()
+    pattern = payload.get("pattern", "").strip()
+    weight = payload.get("weight", 1)
+    if not mode or not label or not pattern:
+        raise HTTPException(status_code=422, detail="mode, label, and pattern are required")
+    # Validate regex
+    import re as _re
+    try:
+        _re.compile(pattern)
+    except _re.error as e:
+        raise HTTPException(status_code=422, detail=f"Invalid regex: {e}")
+    with get_db() as conn:
+        try:
+            cur = conn.execute(
+                "INSERT INTO semantic_anchors (mode, label, pattern, weight, source) "
+                "VALUES (%s, %s, %s, %s, 'manual') RETURNING id",
+                (mode, label, pattern, weight),
+            )
+            row = cur.fetchone()
+        except Exception:
+            raise HTTPException(status_code=409, detail="Anchor with this mode+label already exists")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("anchors:")
+    return {"status": "created", "id": row["id"]}
+
+
+@router.put("/anchors/{anchor_id}")
+def update_anchor(
+    anchor_id: int,
+    payload: dict,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Update a semantic anchor pattern."""
+    mode = payload.get("mode", "").strip()
+    label = payload.get("label", "").strip()
+    pattern = payload.get("pattern", "").strip()
+    weight = payload.get("weight", 1)
+    is_active = payload.get("is_active", True)
+    if not mode or not label or not pattern:
+        raise HTTPException(status_code=422, detail="mode, label, and pattern are required")
+    import re as _re
+    try:
+        _re.compile(pattern)
+    except _re.error as e:
+        raise HTTPException(status_code=422, detail=f"Invalid regex: {e}")
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE semantic_anchors SET mode = %s, label = %s, pattern = %s, "
+            "weight = %s, is_active = %s, updated_at = now() "
+            "WHERE id = %s RETURNING id",
+            (mode, label, pattern, weight, is_active, anchor_id),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("anchors:")
+    return {"status": "updated", "id": anchor_id}
+
+
+@router.delete("/anchors/{anchor_id}")
+def delete_anchor(
+    anchor_id: int,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Delete a semantic anchor pattern."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM semantic_anchors WHERE id = %s RETURNING id",
+            (anchor_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("anchors:")
+    return {"status": "deleted"}
+
+
+@router.patch("/anchors/{anchor_id}/toggle")
+def toggle_anchor(
+    anchor_id: int,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Toggle an anchor pattern on/off."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE semantic_anchors SET is_active = NOT is_active, updated_at = now() "
+            "WHERE id = %s RETURNING id, is_active",
+            (anchor_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Anchor not found")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("anchors:")
+    return {"status": "toggled", "id": anchor_id, "is_active": row["is_active"]}
+
+
+# ===================================================================
+# ANCHOR OVERRIDES (segment mode corrections)
+# ===================================================================
+
+@router.post("/sessions/{session_key}/override-anchor")
+def override_segment_anchor(
+    session_key: str,
+    payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Override the anchor mode for a specific segment.
+    Payload: { "segment_index": int, "corrected_mode": str }
+    Updates the session result_json and logs the override for learning.
+    """
+    seg_idx = payload.get("segment_index")
+    corrected_mode = payload.get("corrected_mode", "").strip()
+    if seg_idx is None or not corrected_mode:
+        raise HTTPException(status_code=422, detail="segment_index and corrected_mode are required")
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT id, result_json FROM transcription_sessions "
+            "WHERE session_key = %s AND user_id = %s",
+            (session_key, user["id"]),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    result = row["result_json"]
+    if isinstance(result, str):
+        result = json.loads(result)
+
+    segments = result.get("segments", [])
+    if seg_idx < 0 or seg_idx >= len(segments):
+        raise HTTPException(status_code=422, detail="segment_index out of range")
+
+    seg = segments[seg_idx]
+    original_mode = seg.get("anchor_mode", "general")
+    segment_text = seg.get("refined_text", seg.get("original_text", ""))
+
+    # Update the segment's anchor mode in result_json
+    seg["anchor_mode"] = corrected_mode
+
+    with get_db() as conn:
+        # Persist updated result_json
+        conn.execute(
+            "UPDATE transcription_sessions SET result_json = %s WHERE id = %s",
+            (json.dumps(result), row["id"]),
+        )
+        # Log the override for learning
+        conn.execute(
+            "INSERT INTO anchor_overrides "
+            "(session_id, segment_index, segment_text, original_mode, corrected_mode, source) "
+            "VALUES (%s, %s, %s, %s, %s, 'manual')",
+            (row["id"], seg_idx, segment_text[:500], original_mode, corrected_mode),
+        )
+
+    return {
+        "status": "overridden",
+        "segment_index": seg_idx,
+        "original_mode": original_mode,
+        "corrected_mode": corrected_mode,
+    }
+
+
+@router.get("/anchor-overrides")
+def list_anchor_overrides(_user: dict = Depends(get_current_user)) -> dict:
+    """Return all anchor overrides for analytics."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT ao.id, ao.segment_text, ao.original_mode, ao.corrected_mode, "
+            "ao.source, ao.created_at, ts.filename "
+            "FROM anchor_overrides ao "
+            "JOIN transcription_sessions ts ON ts.id = ao.session_id "
+            "ORDER BY ao.created_at DESC LIMIT 200"
+        )
+        rows = cur.fetchall()
+    return {"overrides": [dict(r) for r in rows]}
+
+
+# ===================================================================
 # HEALTH (public)
 # ===================================================================
 

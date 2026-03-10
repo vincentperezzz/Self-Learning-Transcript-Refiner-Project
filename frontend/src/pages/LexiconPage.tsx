@@ -233,6 +233,7 @@ export default function LexiconPage() {
                 <option value="consequences">Consequences</option>
                 <option value="ptp_commitment">PTP / Commitment</option>
                 <option value="payment_channel">Payment Channel</option>
+                <option value="contact_info">Contact Info</option>
                 <option value="recap">Recap</option>
                 <option value="empathy">Empathy</option>
                 <option value="objection_handling">Objection Handling</option>
