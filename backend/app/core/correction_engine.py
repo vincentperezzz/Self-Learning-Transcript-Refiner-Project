@@ -36,6 +36,31 @@ from app.models.schemas import (
 
 logger = logging.getLogger(__name__)
 
+# ── Stopword guard: common words that should never be auto-learned as
+#    single-word lexicon replacements.  Prevents catastrophic rules like
+#    "you" → "po" from polluting all future transcripts.
+_STOPWORDS: frozenset[str] = frozenset({
+    # English pronouns / determiners
+    "i", "me", "my", "you", "your", "he", "him", "his", "she", "her",
+    "it", "its", "we", "us", "our", "they", "them", "their", "who",
+    "whom", "this", "that", "these", "those",
+    # English verbs / auxiliaries
+    "is", "am", "are", "was", "were", "be", "been", "being",
+    "do", "did", "does", "done", "has", "had", "have", "having",
+    "will", "would", "shall", "should", "can", "could", "may", "might",
+    "must",
+    # English conjunctions / prepositions / articles
+    "a", "an", "the", "and", "but", "or", "nor", "if", "so", "yet",
+    "at", "by", "in", "on", "to", "of", "for", "up", "off", "out",
+    "with", "from", "into", "over", "then", "than", "not", "no", "yes",
+    # Filipino particles / common words
+    "po", "ho", "ko", "mo", "ka", "na", "ba", "pa", "naman", "lang",
+    "nga", "din", "rin", "pala", "daw", "raw", "siya", "niya",
+    "kami", "tayo", "sila", "ang", "ng", "sa", "mga",
+    # Common greetings / fillers
+    "sir", "ma'am", "maam", "okay", "ok", "uh", "um", "ah",
+})
+
 
 class CorrectionEngine:
     """
@@ -203,8 +228,9 @@ class CorrectionEngine:
                             gc.original, gc.corrected, CorrectionSource.GEMINI
                         )
 
-                        # Auto-add to lexicon for future matching
-                        self._auto_add_lexicon_rule(gc)
+                        # Auto-add to lexicon for future matching (with anchor scope)
+                        seg_mode = rs.anchor_mode.value if rs.anchor_mode else None
+                        self._auto_add_lexicon_rule(gc, anchor_mode=seg_mode)
                         logger.info(
                             "Gemini corrected [seg %d]: '%s' → '%s'",
                             gc.segment_index, gc.original, gc.corrected,
@@ -377,18 +403,42 @@ class CorrectionEngine:
                 )
         return text, details
 
-    def _auto_add_lexicon_rule(self, gc: GeminiCorrection) -> None:
-        """Add a Gemini correction as a probationary lexicon rule (Gate 2: check blocklist)."""
+    def _auto_add_lexicon_rule(
+        self, gc: GeminiCorrection, anchor_mode: Optional[str] = None,
+    ) -> None:
+        """Add a Gemini correction as a probationary lexicon rule.
+        
+        Gates:
+          0. Stopword guard — single common words are never auto-learned
+          1. Blocklist check — banned pairs are never re-learned
+        """
+        wrong = gc.original.lower().strip()
+
+        # Gate 0: Stopword guard — reject single-word common words
+        words = wrong.split()
+        if len(words) == 1 and wrong in _STOPWORDS:
+            logger.info(
+                "Stopword guard prevented auto-learn: '%s' → '%s'",
+                gc.original, gc.corrected,
+            )
+            return
+
+        # Gate 1: Blocklist check
         if self._is_blocklisted(gc.original, gc.corrected):
             logger.info("Blocklist prevented auto-learn: '%s' → '%s'", gc.original, gc.corrected)
             return
         try:
             with get_db() as conn:
                 conn.execute(
-                    "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
-                    "VALUES (%s, %s, %s, FALSE) "
+                    "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, anchor_mode, is_permanent) "
+                    "VALUES (%s, %s, %s, %s, FALSE) "
                     "ON CONFLICT (wrong_phrase) DO NOTHING",
-                    (gc.original.lower(), gc.corrected, "auto-learned from Gemini (probationary)"),
+                    (
+                        wrong,
+                        gc.corrected,
+                        "auto-learned from Gemini (probationary)",
+                        anchor_mode,
+                    ),
                 )
         except Exception as e:
             logger.warning("Failed to auto-add lexicon rule '%s': %s", gc.original, e)

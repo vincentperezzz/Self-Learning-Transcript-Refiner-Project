@@ -37,19 +37,32 @@ class LexiconChecker:
         text: str,
         anchor_mode: Optional[AnchorMode] = None,
     ) -> list[LexiconMatch]:
+        """Check text against lexicon rules (for reporting, not applying).
+        Uses the same short-word guard as apply() for consistency."""
         rules = self._load_rules(anchor_mode)
         matches: list[LexiconMatch] = []
 
         for rule in rules:
+            wrong = rule["wrong_phrase"]
+            rule_anchor = rule["anchor_mode"]
+
+            # Short-word guard: same as apply()
+            words = wrong.split()
+            if len(words) == 1 and len(wrong) <= 3:
+                if rule_anchor is None:
+                    continue
+                if anchor_mode is None or anchor_mode.value != rule_anchor:
+                    continue
+
             pattern = re.compile(
-                r'\b' + re.escape(rule["wrong_phrase"]) + r'\b', re.IGNORECASE
+                r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE
             )
             for m in pattern.finditer(text):
                 matches.append(
                     LexiconMatch(
-                        wrong_phrase=rule["wrong_phrase"],
+                        wrong_phrase=wrong,
                         correct_phrase=rule["correct_phrase"],
-                        anchor_mode=rule["anchor_mode"],
+                        anchor_mode=rule_anchor,
                         span=m.span(),
                     )
                 )
@@ -63,23 +76,42 @@ class LexiconChecker:
     ) -> tuple[str, list[LexiconMatch]]:
         """Apply lexicon rules sequentially — each rule runs against the
         result of the previous, so chained corrections work correctly.
-        Rules are tried longest-first to give specific phrases priority."""
+        Rules are tried longest-first to give specific phrases priority.
+
+        Short-word guard (Fix 3): Single-word rules with ≤3 characters are
+        skipped if they have no anchor_mode (universal scope), as they are
+        too risky to apply globally. Short rules scoped to an anchor_mode
+        are applied only when the segment's anchor_mode matches."""
         rules = self._load_rules(anchor_mode)
         corrected = text
         all_matches: list[LexiconMatch] = []
 
         for rule in rules:
+            wrong = rule["wrong_phrase"]
+            rule_anchor = rule["anchor_mode"]
+
+            # Short-word guard: single-word rules ≤3 chars without anchor_mode
+            # are too dangerous — skip them to prevent "you" → "po" disasters
+            words = wrong.split()
+            if len(words) == 1 and len(wrong) <= 3:
+                if rule_anchor is None:
+                    # No anchor_mode = universal scope — too risky for short words
+                    continue
+                # Has anchor_mode — only apply if segment matches
+                if anchor_mode is None or anchor_mode.value != rule_anchor:
+                    continue
+
             pattern = re.compile(
-                r'\b' + re.escape(rule["wrong_phrase"]) + r'\b', re.IGNORECASE
+                r'\b' + re.escape(wrong) + r'\b', re.IGNORECASE
             )
             m = pattern.search(corrected)
             if m:
                 corrected = corrected[:m.start()] + rule["correct_phrase"] + corrected[m.end():]
                 all_matches.append(
                     LexiconMatch(
-                        wrong_phrase=rule["wrong_phrase"],
+                        wrong_phrase=wrong,
                         correct_phrase=rule["correct_phrase"],
-                        anchor_mode=rule["anchor_mode"],
+                        anchor_mode=rule_anchor,
                         span=m.span(),
                     )
                 )

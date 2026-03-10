@@ -328,22 +328,26 @@ def correct_segment(
                     with get_db() as conn:
                         # Delete probationary rules whose correct_phrase matches
                         # the word the human says is wrong (no second chance)
-                        conn.execute(
+                        del_result = conn.execute(
                             "DELETE FROM lexicon WHERE correct_phrase ILIKE %s "
                             "AND is_permanent = FALSE",
                             (orig,),
                         )
                         # Demote permanent rules whose correct_phrase matches
                         # the word the human says is wrong (trust erosion)
-                        conn.execute(
+                        demote_result = conn.execute(
                             "UPDATE lexicon SET is_permanent = FALSE, "
                             "context_hint = COALESCE(context_hint, '') || ' [demoted by human override]' "
                             "WHERE correct_phrase ILIKE %s "
                             "AND is_permanent = TRUE",
                             (orig,),
                         )
-                except Exception:
-                    pass
+                except Exception as e:
+                    # Log the error for debugging — trust erosion bugs are critical
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "Trust erosion failed for '%s' → '%s': %s", orig, corr, e
+                    )
                 # Auto-add new correction as probationary (must earn permanent)
                 try:
                     with get_db() as conn:
