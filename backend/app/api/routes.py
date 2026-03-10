@@ -812,10 +812,10 @@ def correction_log(_user: dict = Depends(get_current_user)) -> dict:
             "promoted, last_seen_at "
             "FROM correction_log "
             "ORDER BY occurrences DESC "
-            "LIMIT 100"
+            "LIMIT 500"
         )
         rows = cur.fetchall()
-    return {"entries": [dict(r) for r in rows]}
+    return {"entries": [dict(r) for r in rows], "promotion_threshold": 3}
 
 
 # ===================================================================

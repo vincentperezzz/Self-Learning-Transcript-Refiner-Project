@@ -337,6 +337,7 @@ export function getCorrectionLog() {
       promoted: boolean;
       last_seen_at: string;
     }[];
+    promotion_threshold: number;
   }>("/corrections/log");
 }
 

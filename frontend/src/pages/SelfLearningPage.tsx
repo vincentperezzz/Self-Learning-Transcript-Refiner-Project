@@ -17,6 +17,7 @@ export default function SelfLearningPage() {
   const [filter, setFilter] = useState<string>("all");
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
+  const [promotionThreshold, setPromotionThreshold] = useState(3);
 
   useEffect(() => {
     loadData();
@@ -27,6 +28,7 @@ export default function SelfLearningPage() {
     try {
       const logData = await getCorrectionLog();
       setLogEntries(logData.entries);
+      if (logData.promotion_threshold) setPromotionThreshold(logData.promotion_threshold);
     } catch (e) {
       console.error("Failed to load self-learning data:", e);
     } finally {
@@ -44,24 +46,24 @@ export default function SelfLearningPage() {
   const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   function statusBadge(entry: LogEntry) {
-    if (entry.source === "gemini") {
+    if (entry.source === "lexicon") {
+      return (
+        <span className="text-xs bg-blue-900/50 text-blue-400 px-2 py-0.5 rounded-full">
+          Known Rule
+        </span>
+      );
+    }
+    // gemini and ngram_anchor both start as probationary
+    if (entry.promoted) {
       return (
         <span className="text-xs bg-emerald-900/50 text-emerald-400 px-2 py-0.5 rounded-full">
-          Auto → Permanent
+          Promoted → Permanent
         </span>
       );
     }
-    if (entry.source === "ngram_anchor") {
-      return (
-        <span className="text-xs bg-amber-900/50 text-amber-400 px-2 py-0.5 rounded-full">
-          Auto → Probationary
-        </span>
-      );
-    }
-    // lexicon — already a known rule
     return (
-      <span className="text-xs bg-blue-900/50 text-blue-400 px-2 py-0.5 rounded-full">
-        Known Rule
+      <span className="text-xs bg-amber-900/50 text-amber-400 px-2 py-0.5 rounded-full">
+        Probationary ({entry.occurrences}/{promotionThreshold})
       </span>
     );
   }
@@ -72,8 +74,9 @@ export default function SelfLearningPage() {
       <div>
         <h1 className="text-2xl font-bold">Self-Learning</h1>
         <p className="text-sm text-gray-400 mt-1">
-          All corrections are logged automatically. Gemini corrections add permanent lexicon rules.
-          N-Gram corrections add probationary rules, removed if overridden by human review.
+          All corrections are logged automatically. Both Gemini and N-Gram corrections
+          start as probationary lexicon rules. After {promotionThreshold} occurrences, they are
+          auto-promoted to permanent.
         </p>
       </div>
 
@@ -92,8 +95,8 @@ export default function SelfLearningPage() {
         </button>
         {[
           { key: "lexicon", label: "Lexicon (Known)", color: "text-blue-400" },
-          { key: "ngram_anchor", label: "N-Gram (Probationary)", color: "text-purple-400" },
-          { key: "gemini", label: "Gemini (Permanent)", color: "text-violet-400" },
+          { key: "ngram_anchor", label: "N-Gram (Auto)", color: "text-purple-400" },
+          { key: "gemini", label: "Gemini (Auto)", color: "text-violet-400" },
         ].map((s) => (
           <button
             key={s.key}
