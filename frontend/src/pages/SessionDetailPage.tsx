@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { getSession, downloadSession, correctSegmentWithGemini, overrideSegmentAnchor } from "../api";
+import { getSession, downloadSession, correctSegmentWithGemini, overrideSegmentAnchor, downvoteCorrection } from "../api";
 import type { SessionDetail, RefinedSegment } from "../types";
 
 type ViewMode = "transcript" | "timestamped" | "results";
@@ -76,12 +76,12 @@ export default function SessionDetailPage() {
   const [view, setView] = useState<ViewMode>("timestamped");
   const [downloading, setDownloading] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [elapsed, setElapsed] = useState(0);
-  const elapsedRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startTimeRef = useRef(Date.now());
 
-  // Forward-only stage tracking
-  const STAGES = ["whisper", "lexicon", "ngram", "gemini"] as const;
+  // Forward-only stage tracking (skip whisper for text imports)
+  const isTextImport = session?.filename?.startsWith("text_import_") ?? false;
+  const STAGES = isTextImport
+    ? (["lexicon", "ngram", "gemini"] as const)
+    : (["whisper", "lexicon", "ngram", "gemini"] as const);
   const [highestStageIdx, setHighestStageIdx] = useState(0);
 
   const loadSession = useCallback(() => {
@@ -91,32 +91,25 @@ export default function SessionDetailPage() {
         setSession(data);
         // Update highest stage (forward-only)
         if (data.processing_stage) {
-          const idx = STAGES.indexOf(data.processing_stage as typeof STAGES[number]);
+          const idx = (STAGES as readonly string[]).indexOf(data.processing_stage);
           if (idx >= 0) {
             setHighestStageIdx((prev) => Math.max(prev, idx));
           }
         }
-        // Stop polling + timer once processing is done
+        // Stop polling once processing is done
         if (data.status !== "processing") {
           if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
-          if (elapsedRef.current) { clearInterval(elapsedRef.current); elapsedRef.current = null; }
         }
       })
       .catch(() => setError("Session not found"));
   }, [key]);
 
   useEffect(() => {
-    startTimeRef.current = Date.now();
     loadSession();
     // Poll every 1s for real-time stage updates
     pollRef.current = setInterval(loadSession, 1000);
-    // Smooth elapsed timer — updates every second independently
-    elapsedRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
-    }, 1000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
-      if (elapsedRef.current) clearInterval(elapsedRef.current);
     };
   }, [loadSession]);
 
@@ -165,15 +158,14 @@ export default function SessionDetailPage() {
             <div className="h-16 w-16 border-4 border-sky-600/30 border-t-sky-400 rounded-full animate-spin" />
           </div>
           <div className="text-center space-y-2">
-            <h2 className="text-lg font-semibold text-white">Processing Audio</h2>
+            <h2 className="text-lg font-semibold text-white">
+              {isTextImport ? "Processing Text" : "Processing Audio"}
+            </h2>
             <p className="text-sm text-gray-400 max-w-sm">
-              Transcribing with Whisper and refining through the 3-layer correction pipeline.
-              This page will update automatically when complete.
-            </p>
-            <p className="text-xs text-gray-500 tabular-nums font-mono">
-              {elapsed >= 60
-                ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s elapsed`
-                : `${elapsed}s elapsed`}
+              {isTextImport
+                ? "Refining through the 3-layer correction pipeline. This page will update automatically when complete."
+                : "Transcribing with Whisper and refining through the 3-layer correction pipeline. This page will update automatically when complete."
+              }
             </p>
           </div>
           <div className="flex gap-3 text-xs text-gray-600">
@@ -365,9 +357,24 @@ function SegmentRow({
   const [sending, setSending] = useState(false);
   const [chatError, setChatError] = useState("");
   const [showModeOverride, setShowModeOverride] = useState(false);
+  const [downvotingIdx, setDownvotingIdx] = useState<number | null>(null);
+  const [showDownvoteMenu, setShowDownvoteMenu] = useState<number | null>(null);
 
   const hasFixes = seg.corrections.length > 0;
   const changed = seg.original_text !== seg.refined_text;
+
+  async function handleDownvote(original: string, corrected: string, action: "blocklist" | "demote" | "both", corrIdx: number) {
+    setDownvotingIdx(corrIdx);
+    setShowDownvoteMenu(null);
+    try {
+      await downvoteCorrection({ original, corrected, action });
+      onCorrected();
+    } catch {
+      // ignore
+    } finally {
+      setDownvotingIdx(null);
+    }
+  }
 
   async function handleSendCorrection() {
     if (!instruction.trim()) return;
@@ -530,7 +537,7 @@ function SegmentRow({
           {seg.corrections.map((c, ci) => (
             <span
               key={ci}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/60 text-xs"
+              className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-900/60 text-xs group"
             >
               <span className="line-through text-red-400/80">{c.original}</span>
               <span className="text-gray-600">→</span>
@@ -542,6 +549,53 @@ function SegmentRow({
               >
                 {c.source}
               </span>
+              {/* Downvote button */}
+              <button
+                onClick={() => setShowDownvoteMenu(showDownvoteMenu === ci ? null : ci)}
+                disabled={downvotingIdx === ci}
+                className="ml-1 p-0.5 text-gray-500 hover:text-red-400 transition-colors opacity-0 group-hover:opacity-100"
+                title="Downvote this correction"
+              >
+                {downvotingIdx === ci ? (
+                  <span className="h-3 w-3 border border-red-400 border-t-transparent rounded-full animate-spin inline-block" />
+                ) : (
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                )}
+              </button>
+              {/* Downvote menu dropdown */}
+              {showDownvoteMenu === ci && (
+                <div className="absolute top-full right-0 mt-1 z-20 bg-gray-800 border border-gray-700 rounded-lg shadow-xl min-w-[160px] py-1 text-left">
+                  <button
+                    onClick={() => handleDownvote(c.original, c.corrected, "blocklist", ci)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-900/30 flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clipRule="evenodd" />
+                    </svg>
+                    Blocklist (ban forever)
+                  </button>
+                  <button
+                    onClick={() => handleDownvote(c.original, c.corrected, "demote", ci)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-amber-400 hover:bg-amber-900/30 flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    Demote / Delete rule
+                  </button>
+                  <button
+                    onClick={() => handleDownvote(c.original, c.corrected, "both", ci)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-700/50 flex items-center gap-2"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    Both (demote + blocklist)
+                  </button>
+                </div>
+              )}
             </span>
           ))}
         </div>

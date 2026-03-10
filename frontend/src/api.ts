@@ -269,6 +269,26 @@ export function demoteLexiconRule(id: number) {
 }
 
 // ---------------------------------------------------------------------------
+// Correction Downvote (from session detail)
+// ---------------------------------------------------------------------------
+
+export function downvoteCorrection(payload: {
+  original: string;
+  corrected: string;
+  action: "blocklist" | "demote" | "both";
+  reason?: string;
+}) {
+  return request<{ status: string; blocklisted: boolean; demoted: boolean; deleted: boolean }>(
+    "/corrections/downvote",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Blocklist (Banned Corrections)
 // ---------------------------------------------------------------------------
 

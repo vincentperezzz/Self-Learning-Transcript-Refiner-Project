@@ -303,12 +303,16 @@ async def import_plain_text(
 
     Returns session_key for tracking the refinement process.
     """
+    from datetime import datetime
+
     segments = _parse_plain_text_transcript(payload.text)
     if not segments:
         raise HTTPException(status_code=400, detail="No segments found in text")
 
-    # Create session
+    # Create session with timestamped filename
     session_key = str(uuid.uuid4())[:12].replace("-", "")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H.%M.%S")
+    filename = f"text_import_{timestamp}.txt"
 
     with get_db() as conn:
         cur = conn.execute(
@@ -316,7 +320,7 @@ async def import_plain_text(
             "(session_key, filename, speaker, status, processing_stage, user_id) "
             "VALUES (%s, %s, %s, 'processing', 'refinement', %s) "
             "RETURNING id",
-            (session_key, "text_import.txt", "mixed", user["id"]),
+            (session_key, filename, "mixed", user["id"]),
         )
         session_id = cur.fetchone()["id"]
 
@@ -337,10 +341,23 @@ def _process_text_import(
     segments: list[TranscriptSegment],
 ):
     """Background task to refine imported text segments."""
+    import logging
+    log = logging.getLogger(__name__)
+
+    def _set_stage(stage: str) -> None:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE transcription_sessions SET processing_stage = %s WHERE id = %s",
+                (stage, session_id),
+            )
+
     try:
-        # Build refinement request
+        log.info("Text import processing started for session %s", session_id)
+
+        # Build refinement request (already at 'refinement' stage, skipping whisper)
+        _set_stage("lexicon")
         request = RefinementRequest(segments=segments, speaker="mixed")
-        result = _engine.refine(request)
+        result = _engine.refine(request, on_stage=_set_stage)
 
         # Save result
         result_data = {
@@ -767,6 +784,77 @@ def unban_blocklist_rule(
     if not row:
         raise HTTPException(status_code=404, detail="Blocklist entry not found")
     return {"status": "unbanned"}
+
+
+# ===================================================================
+# DOWNVOTE CORRECTION (from session detail)
+# ===================================================================
+
+@router.post("/corrections/downvote")
+def downvote_correction(
+    payload: dict,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Downvote a correction — blocklist it and optionally demote from lexicon.
+
+    Payload:
+        original: str - the wrong phrase
+        corrected: str - the corrected phrase
+        action: "blocklist" | "demote" | "both"
+        reason: str (optional) - why it's being downvoted
+    """
+    original = payload.get("original", "").strip()
+    corrected = payload.get("corrected", "").strip()
+    action = payload.get("action", "blocklist")
+    reason = payload.get("reason", "User downvoted from session detail")
+
+    if not original or not corrected:
+        raise HTTPException(status_code=400, detail="original and corrected are required")
+
+    results = {"blocklisted": False, "demoted": False, "deleted": False}
+
+    with get_db() as conn:
+        # Always blocklist to prevent re-learning
+        if action in ("blocklist", "both"):
+            try:
+                conn.execute(
+                    "INSERT INTO lexicon_blocklist (wrong_phrase, correct_phrase, reason, banned_by) "
+                    "VALUES (%s, %s, %s, %s) "
+                    "ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING",
+                    (original, corrected, reason, user["username"]),
+                )
+                results["blocklisted"] = True
+            except Exception:
+                pass  # Already blocklisted
+
+        # Find matching lexicon rule
+        cur = conn.execute(
+            "SELECT id, is_permanent FROM lexicon "
+            "WHERE wrong_phrase = %s AND correct_phrase = %s",
+            (original, corrected),
+        )
+        rule = cur.fetchone()
+
+        if rule:
+            if action == "demote" or action == "both":
+                if rule["is_permanent"]:
+                    # Demote to probationary
+                    conn.execute(
+                        "UPDATE lexicon SET is_permanent = FALSE WHERE id = %s",
+                        (rule["id"],),
+                    )
+                    results["demoted"] = True
+                else:
+                    # Already probationary — delete it
+                    conn.execute("DELETE FROM lexicon WHERE id = %s", (rule["id"],))
+                    results["deleted"] = True
+
+        # Invalidate lexicon cache
+        from app.cache import cache_delete_pattern
+        cache_delete_pattern("lexicon:")
+
+    return {"status": "ok", **results}
 
 
 @router.patch("/lexicon/{rule_id}/promote")

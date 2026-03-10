@@ -286,7 +286,9 @@ export default function DashboardPage() {
                     className={`px-2 py-0.5 rounded text-xs ${
                       s.speaker === "agent"
                         ? "bg-sky-900/40 text-sky-300"
-                        : "bg-amber-900/40 text-amber-300"
+                        : s.speaker === "mixed"
+                        ? "bg-yellow-900/40 text-yellow-300"
+                        : "bg-emerald-900/40 text-emerald-300"
                     }`}
                   >
                     {s.speaker}
