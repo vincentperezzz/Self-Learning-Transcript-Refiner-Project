@@ -662,6 +662,11 @@ class CorrectionEngine:
         r'\b([a-zA-Z0-9_-]+)\.([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})\b',
     )
 
+    # Pattern 4: Match any email address for lowercase normalization
+    _EMAIL_LOWERCASE_RE = re.compile(
+        r'[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}',
+    )
+
     def _fix_domain(self, domain: str) -> str:
         """Fix misheard domain names (e.g. 'it mail' → 'gmail')."""
         lower = domain.lower().strip()
@@ -718,6 +723,9 @@ class CorrectionEngine:
             return m.group(0)  # too long — probably not an email
 
         text = self._EMAIL_DOT_FOR_AT_RE.sub(_dot_at_repl, text)
+
+        # Pass 4: Lowercase all email addresses
+        text = self._EMAIL_LOWERCASE_RE.sub(lambda m: m.group(0).lower(), text)
 
         if text != original:
             details.append(
