@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { deleteSession, listSessions } from "../api";
+import Pagination from "../components/Pagination";
 import type { SessionSummary } from "../types";
 
 function formatDuration(created: string, completed?: string | null): string {
@@ -25,6 +26,8 @@ export default function DashboardPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
     loadSessions();
@@ -119,6 +122,8 @@ export default function DashboardPage() {
     (s) => statusFilter === "all" || s.status === statusFilter
   );
 
+  const pagedSessions = filteredSessions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -146,7 +151,7 @@ export default function DashboardPage() {
               return (
                 <button
                   key={value}
-                  onClick={() => setStatusFilter(value)}
+                  onClick={() => { setStatusFilter(value); setCurrentPage(1); }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                     statusFilter === value ? activeClass : inactiveClass
                   }`}
@@ -178,7 +183,7 @@ export default function DashboardPage() {
               return (
                 <button
                   key={value}
-                  onClick={() => setDateFilter(value)}
+                  onClick={() => { setDateFilter(value); setCurrentPage(1); }}
                   className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
                     dateFilter === value
                       ? "bg-gray-700 text-white"
@@ -252,7 +257,7 @@ export default function DashboardPage() {
           </div>
 
           {/* Rows */}
-          {filteredSessions.map((s) => (
+          {pagedSessions.map((s) => (
             <div
               key={s.id}
               className="flex items-center gap-2 px-5 py-3 border-b border-gray-800/50
@@ -358,6 +363,14 @@ export default function DashboardPage() {
             </div>
           ))}
         </div>
+
+        <Pagination
+          currentPage={currentPage}
+          totalItems={filteredSessions.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+        />
         </div>
       )}
     </div>

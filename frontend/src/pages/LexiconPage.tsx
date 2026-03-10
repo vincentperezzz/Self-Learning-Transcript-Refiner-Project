@@ -7,6 +7,7 @@ import {
   promoteLexiconRule,
   updateLexiconRule,
 } from "../api";
+import Pagination from "../components/Pagination";
 import type { LexiconRule } from "../types";
 
 type StatusFilter = "all" | "permanent" | "probationary";
@@ -17,6 +18,8 @@ export default function LexiconPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // Form state
   const [wrongPhrase, setWrongPhrase] = useState("");
@@ -121,6 +124,8 @@ export default function LexiconPage() {
     return matchesSearch && matchesStatus;
   });
 
+  const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -141,7 +146,7 @@ export default function LexiconPage() {
         type="text"
         placeholder="Search rules..."
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
         className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm
                    text-gray-200 focus:outline-none focus:ring-2 focus:ring-sky-600"
       />
@@ -149,7 +154,7 @@ export default function LexiconPage() {
       {/* Status filter tabs */}
       <div className="flex gap-2">
         <button
-          onClick={() => setStatusFilter("all")}
+          onClick={() => { setStatusFilter("all"); setCurrentPage(1); }}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
             statusFilter === "all"
               ? "bg-gray-700 text-white"
@@ -159,7 +164,7 @@ export default function LexiconPage() {
           All ({rules.length})
         </button>
         <button
-          onClick={() => setStatusFilter("permanent")}
+          onClick={() => { setStatusFilter("permanent"); setCurrentPage(1); }}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
             statusFilter === "permanent"
               ? "bg-emerald-900/60 text-emerald-400"
@@ -169,7 +174,7 @@ export default function LexiconPage() {
           Permanent ({permanentCount})
         </button>
         <button
-          onClick={() => setStatusFilter("probationary")}
+          onClick={() => { setStatusFilter("probationary"); setCurrentPage(1); }}
           className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
             statusFilter === "probationary"
               ? "bg-amber-900/60 text-amber-400"
@@ -278,7 +283,7 @@ export default function LexiconPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
-            {filtered.map((rule) => (
+            {paged.map((rule) => (
               <tr key={rule.id} className="hover:bg-gray-900/50">
                 <td className="py-2 pr-3 text-red-400">{rule.wrong_phrase}</td>
                 <td className="py-2 pr-3 text-emerald-400">{rule.correct_phrase}</td>
@@ -352,6 +357,14 @@ export default function LexiconPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalItems={filtered.length}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+      />
     </div>
   );
 }

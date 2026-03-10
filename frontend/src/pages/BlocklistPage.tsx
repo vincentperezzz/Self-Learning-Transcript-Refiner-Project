@@ -4,12 +4,15 @@ import {
   deleteBlocklistRule,
   listBlocklist,
 } from "../api";
+import Pagination from "../components/Pagination";
 import type { BlocklistRule } from "../types";
 
 export default function BlocklistPage() {
   const [rules, setRules] = useState<BlocklistRule[]>([]);
   const [search, setSearch] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   // Form state
   const [wrongPhrase, setWrongPhrase] = useState("");
@@ -67,6 +70,8 @@ export default function BlocklistPage() {
       r.correct_phrase.toLowerCase().includes(search.toLowerCase()),
   );
 
+  const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -95,7 +100,7 @@ export default function BlocklistPage() {
         type="text"
         placeholder="Search banned pairs..."
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => { setSearch(e.target.value); setCurrentPage(1); }}
         className="w-full rounded-lg bg-gray-800 border border-gray-700 px-3 py-2 text-sm
                    text-gray-200 focus:outline-none focus:ring-2 focus:ring-red-600"
       />
@@ -179,7 +184,7 @@ export default function BlocklistPage() {
                 </td>
               </tr>
             )}
-            {filtered.map((rule) => (
+            {paged.map((rule) => (
               <tr key={rule.id} className="hover:bg-gray-900/50">
                 <td className="py-2 pr-3 text-red-400">{rule.wrong_phrase}</td>
                 <td className="py-2 pr-3">
@@ -214,6 +219,14 @@ export default function BlocklistPage() {
           </tbody>
         </table>
       </div>
+
+      <Pagination
+        currentPage={currentPage}
+        totalItems={filtered.length}
+        pageSize={pageSize}
+        onPageChange={setCurrentPage}
+        onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+      />
     </div>
   );
 }

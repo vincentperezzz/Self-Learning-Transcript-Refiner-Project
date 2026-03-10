@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCorrectionLog } from "../api";
+import Pagination from "../components/Pagination";
 
 interface LogEntry {
   original_phrase: string;
@@ -14,6 +15,8 @@ export default function SelfLearningPage() {
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>("all");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(25);
 
   useEffect(() => {
     loadData();
@@ -37,6 +40,8 @@ export default function SelfLearningPage() {
   }, {});
 
   const filtered = filter === "all" ? logEntries : logEntries.filter((e) => e.source === filter);
+
+  const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   function statusBadge(entry: LogEntry) {
     if (entry.source === "gemini") {
@@ -75,7 +80,7 @@ export default function SelfLearningPage() {
       {/* Source filter cards */}
       <div className="flex gap-3">
         <button
-          onClick={() => setFilter("all")}
+          onClick={() => { setFilter("all"); setCurrentPage(1); }}
           className={`flex-1 rounded-lg border p-3 text-center transition-colors ${
             filter === "all"
               ? "bg-gray-700/60 border-gray-500"
@@ -92,7 +97,7 @@ export default function SelfLearningPage() {
         ].map((s) => (
           <button
             key={s.key}
-            onClick={() => setFilter(filter === s.key ? "all" : s.key)}
+            onClick={() => { setFilter(filter === s.key ? "all" : s.key); setCurrentPage(1); }}
             className={`flex-1 rounded-lg border p-3 text-center transition-colors ${
               filter === s.key
                 ? "bg-gray-700/60 border-gray-500"
@@ -117,6 +122,7 @@ export default function SelfLearningPage() {
           <p className="text-xs mt-1">Process some transcripts to see correction data here.</p>
         </div>
       ) : (
+        <>
         <div className="bg-gray-900/60 border border-gray-700 rounded-xl overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -130,7 +136,7 @@ export default function SelfLearningPage() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((e, i) => (
+              {paged.map((e, i) => (
                 <tr
                   key={i}
                   className="border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
@@ -156,6 +162,15 @@ export default function SelfLearningPage() {
             </tbody>
           </table>
         </div>
+
+        <Pagination
+          currentPage={currentPage}
+          totalItems={filtered.length}
+          pageSize={pageSize}
+          onPageChange={setCurrentPage}
+          onPageSizeChange={(s) => { setPageSize(s); setCurrentPage(1); }}
+        />
+        </>
       )}
     </div>
   );

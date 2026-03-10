@@ -11,6 +11,7 @@ import {
   updateAnchor,
   updateGlossaryTerm,
 } from "../api";
+import Pagination from "../components/Pagination";
 import type { AnchorOverride, DomainGlossaryTerm, SemanticAnchor } from "../types";
 
 const ANCHOR_MODES = [
@@ -106,6 +107,14 @@ export default function AnchorsPage() {
   const [glossarySearch, setGlossarySearch] = useState("");
   const [glossaryFilterMode, setGlossaryFilterMode] = useState("");
   const [glossaryError, setGlossaryError] = useState("");
+
+  // Pagination state
+  const [patternsPage, setPatternsPage] = useState(1);
+  const [patternsPageSize, setPatternsPageSize] = useState(25);
+  const [overridesPage, setOverridesPage] = useState(1);
+  const [overridesPageSize, setOverridesPageSize] = useState(25);
+  const [glossaryPage, setGlossaryPage] = useState(1);
+  const [glossaryPageSize, setGlossaryPageSize] = useState(25);
 
   useEffect(() => {
     loadAnchors();
@@ -249,7 +258,9 @@ export default function AnchorsPage() {
   });
 
   // Group glossary by mode
-  const glossaryGrouped = filteredGlossary.reduce(
+  const pagedGlossary = filteredGlossary.slice((glossaryPage - 1) * glossaryPageSize, glossaryPage * glossaryPageSize);
+
+  const glossaryGrouped = pagedGlossary.reduce(
     (acc, t) => {
       (acc[t.anchor_mode] = acc[t.anchor_mode] || []).push(t);
       return acc;
@@ -271,8 +282,10 @@ export default function AnchorsPage() {
     return true;
   });
 
+  const pagedPatterns = filtered.slice((patternsPage - 1) * patternsPageSize, patternsPage * patternsPageSize);
+
   // Group by mode
-  const grouped = filtered.reduce(
+  const grouped = pagedPatterns.reduce(
     (acc, a) => {
       (acc[a.mode] = acc[a.mode] || []).push(a);
       return acc;
@@ -339,12 +352,12 @@ export default function AnchorsPage() {
               type="text"
               placeholder="Search patterns..."
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setPatternsPage(1); }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]"
             />
             <select
               value={filterMode}
-              onChange={(e) => setFilterMode(e.target.value)}
+              onChange={(e) => { setFilterMode(e.target.value); setPatternsPage(1); }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
             >
               <option value="">All Modes</option>
@@ -539,6 +552,14 @@ export default function AnchorsPage() {
               ))}
           </div>
 
+          <Pagination
+            currentPage={patternsPage}
+            totalItems={filtered.length}
+            pageSize={patternsPageSize}
+            onPageChange={setPatternsPage}
+            onPageSizeChange={(s) => { setPatternsPageSize(s); setPatternsPage(1); }}
+          />
+
           {filtered.length === 0 && (
             <div className="text-center text-gray-500 py-12">
               No anchor patterns found.
@@ -558,6 +579,7 @@ export default function AnchorsPage() {
               No overrides recorded yet.
             </div>
           ) : (
+            <>
             <div className="bg-gray-800/30 border border-gray-700/50 rounded-lg overflow-hidden">
               <table className="w-full text-sm">
                 <thead>
@@ -570,7 +592,7 @@ export default function AnchorsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-700/30">
-                  {overrides.map((o) => (
+                  {overrides.slice((overridesPage - 1) * overridesPageSize, overridesPage * overridesPageSize).map((o) => (
                     <tr key={o.id}>
                       <td className="px-4 py-2 text-gray-300 max-w-xs truncate">
                         {o.segment_text}
@@ -600,6 +622,15 @@ export default function AnchorsPage() {
                 </tbody>
               </table>
             </div>
+
+            <Pagination
+              currentPage={overridesPage}
+              totalItems={overrides.length}
+              pageSize={overridesPageSize}
+              onPageChange={setOverridesPage}
+              onPageSizeChange={(s) => { setOverridesPageSize(s); setOverridesPage(1); }}
+            />
+            </>
           )}
         </div>
       )}
@@ -617,12 +648,12 @@ export default function AnchorsPage() {
               type="text"
               placeholder="Search terms..."
               value={glossarySearch}
-              onChange={(e) => setGlossarySearch(e.target.value)}
+              onChange={(e) => { setGlossarySearch(e.target.value); setGlossaryPage(1); }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]"
             />
             <select
               value={glossaryFilterMode}
-              onChange={(e) => setGlossaryFilterMode(e.target.value)}
+              onChange={(e) => { setGlossaryFilterMode(e.target.value); setGlossaryPage(1); }}
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
             >
               <option value="">All Modes</option>
@@ -750,6 +781,14 @@ export default function AnchorsPage() {
                 </div>
               ))}
           </div>
+
+          <Pagination
+            currentPage={glossaryPage}
+            totalItems={filteredGlossary.length}
+            pageSize={glossaryPageSize}
+            onPageChange={setGlossaryPage}
+            onPageSizeChange={(s) => { setGlossaryPageSize(s); setGlossaryPage(1); }}
+          />
 
           {filteredGlossary.length === 0 && (
             <div className="text-center text-gray-500 py-12">
