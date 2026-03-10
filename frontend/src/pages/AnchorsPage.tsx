@@ -1,13 +1,17 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   addAnchor,
+  addGlossaryTerm,
   deleteAnchor,
+  deleteGlossaryTerm,
   listAnchorOverrides,
   listAnchors,
+  listGlossary,
   toggleAnchor,
   updateAnchor,
+  updateGlossaryTerm,
 } from "../api";
-import type { AnchorOverride, SemanticAnchor } from "../types";
+import type { AnchorOverride, DomainGlossaryTerm, SemanticAnchor } from "../types";
 
 const ANCHOR_MODES = [
   "greeting",
@@ -75,11 +79,12 @@ const MODE_COLORS: Record<string, string> = {
   general: "bg-gray-700/40 text-gray-300",
 };
 
-type Tab = "patterns" | "overrides";
+type Tab = "patterns" | "overrides" | "glossary";
 
 export default function AnchorsPage() {
   const [anchors, setAnchors] = useState<SemanticAnchor[]>([]);
   const [overrides, setOverrides] = useState<AnchorOverride[]>([]);
+  const [glossaryTerms, setGlossaryTerms] = useState<DomainGlossaryTerm[]>([]);
   const [tab, setTab] = useState<Tab>("patterns");
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState("");
@@ -87,11 +92,20 @@ export default function AnchorsPage() {
   const [editId, setEditId] = useState<number | null>(null);
   const [error, setError] = useState("");
 
-  // Form state
+  // Form state (patterns)
   const [formMode, setFormMode] = useState("");
   const [formLabel, setFormLabel] = useState("");
   const [formPattern, setFormPattern] = useState("");
   const [formWeight, setFormWeight] = useState(1);
+
+  // Form state (glossary)
+  const [showGlossaryAdd, setShowGlossaryAdd] = useState(false);
+  const [glossaryEditId, setGlossaryEditId] = useState<number | null>(null);
+  const [gFormMode, setGFormMode] = useState("");
+  const [gFormTerm, setGFormTerm] = useState("");
+  const [glossarySearch, setGlossarySearch] = useState("");
+  const [glossaryFilterMode, setGlossaryFilterMode] = useState("");
+  const [glossaryError, setGlossaryError] = useState("");
 
   useEffect(() => {
     loadAnchors();
@@ -176,6 +190,73 @@ export default function AnchorsPage() {
     } catch {}
   }
 
+  // ── Glossary handlers ──
+
+  async function loadGlossary() {
+    try {
+      const data = await listGlossary();
+      setGlossaryTerms(data.terms);
+    } catch {}
+  }
+
+  function resetGlossaryForm() {
+    setGFormMode("");
+    setGFormTerm("");
+    setGlossaryEditId(null);
+    setShowGlossaryAdd(false);
+    setGlossaryError("");
+  }
+
+  function startGlossaryEdit(t: DomainGlossaryTerm) {
+    setGlossaryEditId(t.id);
+    setGFormMode(t.anchor_mode);
+    setGFormTerm(t.term);
+    setShowGlossaryAdd(true);
+    setGlossaryError("");
+  }
+
+  async function handleGlossarySubmit(e: FormEvent) {
+    e.preventDefault();
+    setGlossaryError("");
+    try {
+      if (glossaryEditId) {
+        await updateGlossaryTerm(glossaryEditId, { anchor_mode: gFormMode, term: gFormTerm });
+      } else {
+        await addGlossaryTerm({ anchor_mode: gFormMode, term: gFormTerm });
+      }
+      resetGlossaryForm();
+      loadGlossary();
+    } catch (err) {
+      setGlossaryError(err instanceof Error ? err.message : "Failed to save term");
+    }
+  }
+
+  async function handleGlossaryDelete(id: number) {
+    if (!confirm("Delete this glossary term?")) return;
+    try {
+      await deleteGlossaryTerm(id);
+      setGlossaryTerms((prev) => prev.filter((t) => t.id !== id));
+    } catch {}
+  }
+
+  // Filter glossary
+  const filteredGlossary = glossaryTerms.filter((t) => {
+    if (glossaryFilterMode && t.anchor_mode !== glossaryFilterMode) return false;
+    if (glossarySearch) {
+      return t.term.toLowerCase().includes(glossarySearch.toLowerCase());
+    }
+    return true;
+  });
+
+  // Group glossary by mode
+  const glossaryGrouped = filteredGlossary.reduce(
+    (acc, t) => {
+      (acc[t.anchor_mode] = acc[t.anchor_mode] || []).push(t);
+      return acc;
+    },
+    {} as Record<string, DomainGlossaryTerm[]>,
+  );
+
   // Filter anchors
   const filtered = anchors.filter((a) => {
     if (filterMode && a.mode !== filterMode) return false;
@@ -234,6 +315,19 @@ export default function AnchorsPage() {
           }`}
         >
           Override Log
+        </button>
+        <button
+          onClick={() => {
+            setTab("glossary");
+            loadGlossary();
+          }}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+            tab === "glossary"
+              ? "bg-sky-600/20 text-sky-300"
+              : "text-gray-400 hover:bg-gray-800"
+          }`}
+        >
+          Domain Glossary
         </button>
       </div>
 
@@ -508,6 +602,161 @@ export default function AnchorsPage() {
             </div>
           )}
         </div>
+      )}
+
+      {tab === "glossary" && (
+        <>
+          <p className="text-sm text-gray-400 mb-4">
+            Domain-specific terms for each anchor mode. Fed to Gemini and used for
+            N-gram domain boost to improve correction accuracy.
+          </p>
+
+          {/* Toolbar */}
+          <div className="flex flex-wrap gap-3 mb-4">
+            <input
+              type="text"
+              placeholder="Search terms..."
+              value={glossarySearch}
+              onChange={(e) => setGlossarySearch(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm flex-1 min-w-[200px]"
+            />
+            <select
+              value={glossaryFilterMode}
+              onChange={(e) => setGlossaryFilterMode(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm"
+            >
+              <option value="">All Modes</option>
+              {ANCHOR_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {MODE_LABELS[m] || m}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                resetGlossaryForm();
+                setShowGlossaryAdd(true);
+              }}
+              className="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            >
+              + Add Term
+            </button>
+          </div>
+
+          {/* Add/Edit form */}
+          {showGlossaryAdd && (
+            <form
+              onSubmit={handleGlossarySubmit}
+              className="bg-gray-800/50 border border-gray-700 rounded-lg p-4 mb-6 space-y-3"
+            >
+              <div className="text-sm font-medium text-gray-300 mb-2">
+                {glossaryEditId ? "Edit Glossary Term" : "New Glossary Term"}
+              </div>
+              {glossaryError && (
+                <div className="text-red-400 text-xs bg-red-900/20 px-3 py-2 rounded">
+                  {glossaryError}
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Anchor Mode</label>
+                  <select
+                    value={gFormMode}
+                    onChange={(e) => setGFormMode(e.target.value)}
+                    required
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                  >
+                    <option value="">Select mode...</option>
+                    {ANCHOR_MODES.map((m) => (
+                      <option key={m} value={m}>
+                        {MODE_LABELS[m] || m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-400 block mb-1">Term</label>
+                  <input
+                    type="text"
+                    value={gFormTerm}
+                    onChange={(e) => setGFormTerm(e.target.value)}
+                    required
+                    placeholder="e.g. minimum amount due"
+                    className="w-full bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm"
+                  />
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  type="button"
+                  onClick={resetGlossaryForm}
+                  className="px-4 py-2 text-sm text-gray-400 hover:text-gray-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="bg-sky-600 hover:bg-sky-500 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  {glossaryEditId ? "Update" : "Create"}
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Grouped glossary terms */}
+          <div className="space-y-4">
+            {Object.entries(glossaryGrouped)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([mode, terms]) => (
+                <div
+                  key={mode}
+                  className="bg-gray-800/30 border border-gray-700/50 rounded-lg overflow-hidden"
+                >
+                  <div className="px-4 py-2 border-b border-gray-700/50 flex items-center gap-2">
+                    <span
+                      className={`px-2 py-0.5 rounded text-xs font-medium ${MODE_COLORS[mode] || MODE_COLORS.general}`}
+                    >
+                      {MODE_LABELS[mode] || mode}
+                    </span>
+                    <span className="text-xs text-gray-500">
+                      {terms.length} term{terms.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-gray-700/30">
+                    {terms.map((t) => (
+                      <div
+                        key={t.id}
+                        className="px-4 py-2.5 flex items-center gap-3 text-sm"
+                      >
+                        <span className="flex-1 text-gray-300">{t.term}</span>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => startGlossaryEdit(t)}
+                            className="px-2 py-1 rounded text-xs bg-gray-700 text-gray-300 hover:bg-gray-600"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleGlossaryDelete(t.id)}
+                            className="px-2 py-1 rounded text-xs text-red-400 hover:bg-red-900/30"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+          </div>
+
+          {filteredGlossary.length === 0 && (
+            <div className="text-center text-gray-500 py-12">
+              No glossary terms found.
+            </div>
+          )}
+        </>
       )}
     </div>
   );

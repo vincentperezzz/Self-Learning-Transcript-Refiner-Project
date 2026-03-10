@@ -206,6 +206,22 @@ def _fetch_lexicon_rules() -> list[dict]:
         return []
 
 
+def _fetch_domain_glossary() -> dict[str, list[str]]:
+    """Load domain glossary terms from DB, grouped by anchor_mode."""
+    try:
+        with get_db() as conn:
+            cur = conn.execute(
+                "SELECT anchor_mode, term FROM domain_glossary ORDER BY anchor_mode, term"
+            )
+            grouped: dict[str, list[str]] = {}
+            for row in cur.fetchall():
+                grouped.setdefault(row["anchor_mode"], []).append(row["term"])
+            return grouped
+    except Exception as e:
+        logger.warning("Could not load domain glossary: %s", e)
+        return {}
+
+
 def correct_transcript_sync(
     segments: list[dict],
     low_confidence_words: list[dict] | None = None,
@@ -228,13 +244,27 @@ def correct_transcript_sync(
         logger.warning("GEMINI_API_KEY not set — skipping Gemini correction layer")
         return []
 
-    # Build transcript text for the prompt
+    # Build transcript text for the prompt (include anchor mode if available)
     transcript_lines = []
     for seg in segments:
+        mode_tag = f" ({seg['anchor_mode']})" if seg.get("anchor_mode") else ""
         transcript_lines.append(
-            f"[{seg['index']}] [{seg['start']:.1f}s-{seg['end']:.1f}s] {seg['text']}"
+            f"[{seg['index']}] [{seg['start']:.1f}s-{seg['end']:.1f}s]{mode_tag} {seg['text']}"
         )
     transcript_text = "\n".join(transcript_lines)
+
+    # Build domain glossary section from DB
+    glossary = _fetch_domain_glossary()
+    glossary_text = ""
+    if glossary:
+        glossary_lines = []
+        for mode, terms in glossary.items():
+            glossary_lines.append(f"  {mode}: {', '.join(terms)}")
+        glossary_text = (
+            "\n\nDOMAIN GLOSSARY — Use these terms when correcting segments of each type. "
+            "If a Whisper transcription sounds phonetically similar to one of these terms, "
+            "prefer the domain term:\n" + "\n".join(glossary_lines)
+        )
 
     # Build low-confidence section
     low_conf_text = ""
@@ -250,7 +280,7 @@ def correct_transcript_sync(
             + "\n".join(low_conf_lines)
         )
 
-    user_message = f"TRANSCRIPT:\n{transcript_text}{low_conf_text}"
+    user_message = f"TRANSCRIPT:\n{transcript_text}{glossary_text}{low_conf_text}"
 
     # Include unknown words detected by N-gram corpus analysis
     if unknown_words:

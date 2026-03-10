@@ -135,3 +135,11 @@ export interface AnchorOverride {
   created_at: string;
   filename: string;
 }
+
+// Domain Glossary
+export interface DomainGlossaryTerm {
+  id: number;
+  anchor_mode: string;
+  term: string;
+  created_at: string;
+}

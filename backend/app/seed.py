@@ -395,6 +395,152 @@ def seed_anchors() -> int:
     return count
 
 
+def seed_domain_glossary() -> int:
+    """Seed domain-specific terms tied to anchor modes.
+
+    These terms are fed to Gemini L3 and used for N-gram domain boost
+    so the system knows the correct vocabulary for each call segment type.
+    """
+    terms = [
+        # ── ACCOUNT_STATUS ──
+        ("account_status", "minimum amount due"),
+        ("account_status", "outstanding balance"),
+        ("account_status", "total amount due"),
+        ("account_status", "principal balance"),
+        ("account_status", "past due amount"),
+        ("account_status", "remaining balance"),
+        ("account_status", "overdue balance"),
+        ("account_status", "current balance"),
+        ("account_status", "statement of account"),
+        ("account_status", "credit limit"),
+        ("account_status", "available credit"),
+        ("account_status", "billing statement"),
+        ("account_status", "account number"),
+        ("account_status", "delinquent account"),
+        ("account_status", "days past due"),
+        ("account_status", "last payment date"),
+        ("account_status", "last payment amount"),
+        ("account_status", "finance charges"),
+        ("account_status", "late payment charges"),
+        ("account_status", "penalty charges"),
+        ("account_status", "interest rate"),
+        ("account_status", "annual fee"),
+        # ── NEGOTIATION ──
+        ("negotiation", "settlement amount"),
+        ("negotiation", "payment arrangement"),
+        ("negotiation", "payment plan"),
+        ("negotiation", "restructure"),
+        ("negotiation", "waive the charges"),
+        ("negotiation", "installment plan"),
+        ("negotiation", "one-time payment"),
+        ("negotiation", "lump sum"),
+        ("negotiation", "amnesty program"),
+        ("negotiation", "amnesty promo"),
+        ("negotiation", "discount offer"),
+        ("negotiation", "settle the account"),
+        ("negotiation", "settle the minimum amount"),
+        # ── PTP_COMMITMENT ──
+        ("ptp_commitment", "promise to pay"),
+        ("ptp_commitment", "payment date"),
+        ("ptp_commitment", "pay on or before"),
+        ("ptp_commitment", "payment commitment"),
+        ("ptp_commitment", "committed amount"),
+        ("ptp_commitment", "due date"),
+        # ── PAYMENT_CHANNEL ──
+        ("payment_channel", "payment channel"),
+        ("payment_channel", "online banking"),
+        ("payment_channel", "over the counter"),
+        ("payment_channel", "bills payment"),
+        ("payment_channel", "GCash"),
+        ("payment_channel", "Maya"),
+        ("payment_channel", "bank transfer"),
+        ("payment_channel", "payment center"),
+        ("payment_channel", "convenience store"),
+        ("payment_channel", "auto-debit"),
+        # ── VERIFICATION ──
+        ("verification", "date of birth"),
+        ("verification", "birthdate"),
+        ("verification", "birthday"),
+        ("verification", "full name"),
+        ("verification", "middle name"),
+        ("verification", "billing address"),
+        ("verification", "mailing address"),
+        ("verification", "mother's maiden name"),
+        ("verification", "verification purposes"),
+        # ── GREETING ──
+        ("greeting", "good morning"),
+        ("greeting", "good afternoon"),
+        ("greeting", "good evening"),
+        # ── INTRODUCTION ──
+        ("introduction", "accredited service provider"),
+        ("introduction", "SP Madrid Law"),
+        ("introduction", "law firm"),
+        ("introduction", "calling on behalf of"),
+        ("introduction", "Future Bank"),
+        # ── CONSENT_TO_RECORD ──
+        ("consent_to_record", "recorded line"),
+        ("consent_to_record", "over the recorded line"),
+        ("consent_to_record", "recording this call"),
+        ("consent_to_record", "call recording"),
+        # ── CONTACT_INFO ──
+        ("contact_info", "contact number"),
+        ("contact_info", "mobile number"),
+        ("contact_info", "cellphone number"),
+        ("contact_info", "email address"),
+        ("contact_info", "landline number"),
+        ("contact_info", "alternate number"),
+        # ── CLOSING ──
+        ("closing", "thank you for your time"),
+        ("closing", "have a nice day"),
+        ("closing", "have a good day"),
+        ("closing", "goodbye"),
+        ("closing", "thank you and goodbye"),
+        ("closing", "anything else I can help"),
+        # ── CONSEQUENCES ──
+        ("consequences", "legal action"),
+        ("consequences", "demand letter"),
+        ("consequences", "court case"),
+        ("consequences", "credit standing"),
+        ("consequences", "credit report"),
+        ("consequences", "endorsement to legal"),
+        ("consequences", "higher department"),
+        # ── BENEFITS ──
+        ("benefits", "good credit standing"),
+        ("benefits", "avoid additional charges"),
+        ("benefits", "waiver of penalty"),
+        ("benefits", "zero interest"),
+        ("benefits", "clean record"),
+        # ── EMPATHY ──
+        ("empathy", "I understand"),
+        ("empathy", "I appreciate"),
+        ("empathy", "thank you for sharing"),
+        ("empathy", "I hear you"),
+        # ── RECAP ──
+        ("recap", "to summarize"),
+        ("recap", "just to recap"),
+        ("recap", "so to confirm"),
+        ("recap", "as discussed"),
+        # ── OBJECTION_HANDLING ──
+        ("objection_handling", "I understand your concern"),
+        ("objection_handling", "financial difficulty"),
+        ("objection_handling", "budget constraints"),
+    ]
+
+    count = 0
+    with get_db() as conn:
+        for mode, term in terms:
+            conn.execute(
+                """
+                INSERT INTO domain_glossary (anchor_mode, term)
+                VALUES (%s, %s)
+                ON CONFLICT (anchor_mode, term) DO NOTHING
+                """,
+                (mode, term),
+            )
+            count += 1
+    return count
+
+
 def main() -> None:
     print("Initialising database...")
     init_db()
@@ -415,6 +561,10 @@ def main() -> None:
     print("Seeding Semantic Anchors...")
     anchor_count = seed_anchors()
     print(f"  -> {anchor_count} anchor patterns inserted.")
+
+    print("Seeding Domain Glossary...")
+    glossary_count = seed_domain_glossary()
+    print(f"  -> {glossary_count} domain terms inserted.")
 
     print("Done! Phoenix 3.0 database is ready.")
 

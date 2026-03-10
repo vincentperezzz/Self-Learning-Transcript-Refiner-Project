@@ -1037,6 +1037,101 @@ def list_anchor_overrides(_user: dict = Depends(get_current_user)) -> dict:
 
 
 # ===================================================================
+# DOMAIN GLOSSARY
+# ===================================================================
+
+@router.get("/glossary")
+def list_glossary(
+    mode: Optional[str] = None,
+    search: Optional[str] = None,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """List domain glossary terms, optionally filtered by mode or search."""
+    conditions: list[str] = []
+    params: list[str] = []
+    if mode:
+        conditions.append("anchor_mode = %s")
+        params.append(mode)
+    if search:
+        conditions.append("term ILIKE %s")
+        params.append(f"%{search}%")
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    with get_db() as conn:
+        cur = conn.execute(
+            f"SELECT * FROM domain_glossary {where} ORDER BY anchor_mode, term",
+            params,
+        )
+        rows = cur.fetchall()
+    return {"terms": [dict(r) for r in rows]}
+
+
+@router.post("/glossary", status_code=201)
+def add_glossary_term(
+    payload: dict,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Add a new domain glossary term."""
+    anchor_mode = (payload.get("anchor_mode") or "").strip().lower()
+    term = (payload.get("term") or "").strip()
+    if not anchor_mode or not term:
+        raise HTTPException(400, "anchor_mode and term are required")
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO domain_glossary (anchor_mode, term) "
+            "VALUES (%s, %s) ON CONFLICT (anchor_mode, term) DO NOTHING RETURNING *",
+            (anchor_mode, term),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(409, "Term already exists for this mode")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("glossary:")
+    return {"term": dict(row)}
+
+
+@router.put("/glossary/{term_id}")
+def update_glossary_term(
+    term_id: int,
+    payload: dict,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Update a glossary term."""
+    anchor_mode = (payload.get("anchor_mode") or "").strip().lower()
+    term = (payload.get("term") or "").strip()
+    if not anchor_mode or not term:
+        raise HTTPException(400, "anchor_mode and term are required")
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE domain_glossary SET anchor_mode = %s, term = %s WHERE id = %s RETURNING *",
+            (anchor_mode, term, term_id),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Term not found")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("glossary:")
+    return {"term": dict(row)}
+
+
+@router.delete("/glossary/{term_id}")
+def delete_glossary_term(
+    term_id: int,
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """Delete a glossary term."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM domain_glossary WHERE id = %s RETURNING id", (term_id,)
+        )
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, "Term not found")
+    from app.cache import cache_delete_pattern
+    cache_delete_pattern("glossary:")
+    return {"deleted": True}
+
+
+# ===================================================================
 # HEALTH (public)
 # ===================================================================
 

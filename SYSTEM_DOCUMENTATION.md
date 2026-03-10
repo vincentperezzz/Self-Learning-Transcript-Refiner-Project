@@ -472,7 +472,7 @@ View and manage permanently banned correction pairs. Each entry shows: wrong phr
 - **Unban** (checkmark) — remove the ban, allowing the system to learn this correction again
 
 ### Anchors Page
-Manage the database-backed semantic anchor patterns that drive intent classification. Two tabs:
+Manage the database-backed semantic anchor patterns that drive intent classification. Three tabs:
 
 **Patterns tab:**
 - View all anchor patterns grouped by mode with color-coded badges
@@ -488,6 +488,22 @@ Manage the database-backed semantic anchor patterns that drive intent classifica
 - Table of all manual anchor mode overrides made by users in Session Detail
 - Shows segment text, original mode → corrected mode, source, filename
 - Used for analytics and future self-learning (identifying systematic misclassifications)
+
+**Domain Glossary tab:**
+- Manage domain-specific terms tied to each anchor mode (e.g., "minimum amount due" for ACCOUNT_STATUS)
+- Terms are **fed to Gemini L3** — the AI corrector uses them as context to prefer domain vocabulary when correcting phonetically similar mishearings
+- Terms also enable **N-gram domain boost** — when a segment's anchor mode has glossary terms, the N-gram auditor will bypass phonetic similarity checks for glossary words, allowing corrections like "you" → "due" that would normally fail edit-distance checks
+- Add/edit/delete terms with anchor mode + term fields
+- Grouped by mode with color-coded badges, same layout as Patterns tab
+- Seed data includes 100+ terms across financial, legal, and customer service domains
+
+**How Domain Glossary improves accuracy (example):**
+1. Whisper transcribes "due" as "you" → text: "minimum amount, you"
+2. N-gram sees `(minimum, amount, you)` with freq=0 and `(minimum, amount, due)` with freq=2559
+3. Normally, "you"→"due" fails phonetic similarity (edit distance 3 > threshold 1)
+4. BUT "due" is a glossary word for ACCOUNT_STATUS mode → phonetic check bypassed
+5. N-gram corrects to "minimum amount, due" ✅
+6. Even if N-gram doesn't catch it, Gemini L3 receives the glossary terms and knows to prefer "minimum amount due" over "minimum amount, po"
 
 **Anchor Override in Session Detail:**
 - Each segment's anchor badge is now clickable
@@ -643,6 +659,7 @@ Gemini returns corrected text + list of changes
 | `correction_log` | Every correction ever made, for self-learning | original_phrase, corrected_phrase, source, occurrences, promoted |
 | `semantic_anchors` | DB-backed anchor patterns (replaces hardcoded list) | mode, label, pattern (regex), weight (1-5), is_active, source (seed/manual/learned) |
 | `anchor_overrides` | Logs every manual anchor mode override | session_id (FK), segment_index, segment_text, original_mode, corrected_mode, source |
+| `domain_glossary` | Domain-specific terms per anchor mode (fed to Gemini + N-gram) | anchor_mode, term, UNIQUE(anchor_mode, term) |
 | `users` | Authentication accounts | username, password_hash, role |
 | `transcription_sessions` | Saved refinement results with full JSON data | session_key, status, processing_stage, result_json, completed_at |
 
@@ -686,6 +703,10 @@ Gemini returns corrected text + list of changes
 | PATCH | `/api/v1/anchors/{id}/toggle` | Toggle anchor pattern active/inactive |
 | POST | `/api/v1/sessions/{key}/override-anchor` | Override a segment's anchor mode |
 | GET | `/api/v1/anchor-overrides` | List all anchor override history |
+| GET | `/api/v1/glossary` | List domain glossary terms (search, mode filter) |
+| POST | `/api/v1/glossary` | Add a domain glossary term |
+| PUT | `/api/v1/glossary/{id}` | Update a glossary term |
+| DELETE | `/api/v1/glossary/{id}` | Delete a glossary term |
 
 ## Configuration
 

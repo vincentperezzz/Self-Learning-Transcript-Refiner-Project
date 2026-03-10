@@ -148,6 +148,14 @@ CREATE TABLE IF NOT EXISTS anchor_overrides (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS domain_glossary (
+    id              SERIAL PRIMARY KEY,
+    anchor_mode     TEXT    NOT NULL,
+    term            TEXT    NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE(anchor_mode, term)
+);
+
 CREATE INDEX IF NOT EXISTS idx_ngram_words ON ngram_frequency(word1, word2, word3);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lexicon_wrong ON lexicon(wrong_phrase);
 CREATE INDEX IF NOT EXISTS idx_correction_log_occ ON correction_log(occurrences);
@@ -155,6 +163,7 @@ CREATE INDEX IF NOT EXISTS idx_sessions_user ON transcription_sessions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_key ON transcription_sessions(session_key);
 CREATE INDEX IF NOT EXISTS idx_anchor_patterns_mode ON semantic_anchors(mode);
 CREATE INDEX IF NOT EXISTS idx_anchor_overrides_session ON anchor_overrides(session_id);
+CREATE INDEX IF NOT EXISTS idx_domain_glossary_mode ON domain_glossary(anchor_mode);
 """
 
 

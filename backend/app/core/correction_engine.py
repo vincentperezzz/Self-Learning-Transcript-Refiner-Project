@@ -59,6 +59,31 @@ class CorrectionEngine:
             )
             return cur.fetchone() is not None
 
+    @staticmethod
+    def _get_domain_words(anchor_mode: str) -> set[str]:
+        """Extract individual words from domain glossary terms for an anchor mode.
+        Used by N-gram audit to bypass phonetic similarity for domain vocabulary."""
+        from app.cache import cache_get, cache_set
+        cache_key = f"glossary:words:{anchor_mode}"
+        cached = cache_get(cache_key)
+        if cached is not None:
+            return set(cached)
+        try:
+            with get_db() as conn:
+                cur = conn.execute(
+                    "SELECT term FROM domain_glossary WHERE anchor_mode = %s",
+                    (anchor_mode,),
+                )
+                words: set[str] = set()
+                for row in cur.fetchall():
+                    for w in row["term"].lower().split():
+                        if len(w) >= 3:  # skip tiny words
+                            words.add(w)
+            cache_set(cache_key, list(words), ttl=300)
+            return words
+        except Exception:
+            return set()
+
     # ------------------------------------------------------------------
     # Public
     # ------------------------------------------------------------------
@@ -134,6 +159,7 @@ class CorrectionEngine:
                     "text": rs.refined_text,
                     "start": rs.start,
                     "end": rs.end,
+                    "anchor_mode": rs.anchor_mode.value if rs.anchor_mode else None,
                 }
                 for idx, rs in enumerate(refined_segments)
             ]
@@ -304,7 +330,13 @@ class CorrectionEngine:
         lex_corrections: Optional[list[CorrectionDetail]] = None,
     ) -> tuple[str, list[CorrectionDetail]]:
         self.ngram_auditor.build_trigrams(text)
-        candidates = self.ngram_auditor.audit()
+
+        # Load domain glossary words for the segment's anchor mode
+        domain_words: set[str] = set()
+        if mode:
+            domain_words = self._get_domain_words(mode.value)
+
+        candidates = self.ngram_auditor.audit(domain_words=domain_words)
 
         # Build protected word set from lexicon corrections
         protected: set[str] = set()

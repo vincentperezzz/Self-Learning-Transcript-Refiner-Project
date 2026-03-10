@@ -201,7 +201,7 @@ class NGramAuditor:
     # Audit logic
     # ------------------------------------------------------------------
 
-    def audit(self) -> list[TrigramCandidate]:
+    def audit(self, domain_words: set[str] | None = None) -> list[TrigramCandidate]:
         """
         For each trigram from the last `build_trigrams` call, check if a
         higher-frequency alternative exists.
@@ -209,10 +209,12 @@ class NGramAuditor:
         Guards:
           1. Original trigram must have frequency == 0 (unknown to the system).
           2. Alternative must have frequency >= MIN_SUGGESTED_FREQ.
-          3. The differing word must be phonetically similar (edit distance).
+          3. The differing word must be phonetically similar (edit distance)
+             — OR the suggested word appears in `domain_words` (glossary bypass).
           4. Confidence must exceed SWAP_THRESHOLD.
         """
         candidates: list[TrigramCandidate] = []
+        _dw = domain_words or set()
 
         for tri in self._trigrams:
             w1, w2, w3 = tri
@@ -230,8 +232,8 @@ class NGramAuditor:
                 # Guard 2: alternative must be well-attested
                 if alt_freq < self.MIN_SUGGESTED_FREQ:
                     continue
-                # Guard 3: phonetic similarity check
-                if not _is_phonetically_similar(w3, alt_w3):
+                # Guard 3: phonetic similarity OR domain glossary match
+                if alt_w3 not in _dw and not _is_phonetically_similar(w3, alt_w3):
                     continue
                 total = alt_freq + orig_freq
                 conf = alt_freq / total
@@ -253,8 +255,8 @@ class NGramAuditor:
                 # Guard 2: alternative must be well-attested
                 if alt_freq < self.MIN_SUGGESTED_FREQ:
                     continue
-                # Guard 3: phonetic similarity check
-                if not _is_phonetically_similar(w1, alt_w1):
+                # Guard 3: phonetic similarity OR domain glossary match
+                if alt_w1 not in _dw and not _is_phonetically_similar(w1, alt_w1):
                     continue
                 total = alt_freq + orig_freq
                 conf = alt_freq / total

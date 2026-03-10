@@ -1,6 +1,7 @@
 import type {
   AnchorOverride,
   BlocklistRule,
+  DomainGlossaryTerm,
   HealthResponse,
   LexiconRule,
   NGramEntry,
@@ -414,4 +415,32 @@ export function overrideSegmentAnchor(
 
 export function listAnchorOverrides() {
   return request<{ overrides: AnchorOverride[] }>("/anchor-overrides");
+}
+
+// ── Domain Glossary ──
+
+export function listGlossary(search?: string, mode?: string) {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (mode) params.set("mode", mode);
+  const qs = params.toString();
+  return request<{ terms: DomainGlossaryTerm[] }>(`/glossary${qs ? `?${qs}` : ""}`);
+}
+
+export function addGlossaryTerm(payload: { anchor_mode: string; term: string }) {
+  return request<{ term: DomainGlossaryTerm }>("/glossary", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function updateGlossaryTerm(id: number, payload: { anchor_mode: string; term: string }) {
+  return request<{ term: DomainGlossaryTerm }>(`/glossary/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteGlossaryTerm(id: number) {
+  return request<{ deleted: boolean }>(`/glossary/${id}`, { method: "DELETE" });
 }
