@@ -759,6 +759,7 @@ flowchart TD
         LEX[(📚 LEXICON TABLE<br/>Permanent + Probationary rules)]
         GLOSS[(📖 DOMAIN GLOSSARY<br/>Terms per anchor_mode)]
         NGRAM[(📊 N-GRAM FREQUENCY<br/>Trigram statistics)]
+        CLOG[(📋 CORRECTION LOG<br/>All corrections tracked)]
     end
     
     subgraph L1Layer[Layer 1: Lexicon]
@@ -775,6 +776,7 @@ flowchart TD
     NGRAM --> L2
     GLOSS --> L2
     L2 --> POST
+    L2 -.->|Log corrections| CLOG
     
     subgraph PostProc[Post-Processing]
         POST[⚙️ POST-PROCESSING<br/>• Pesos/centavos → ₱X.YY<br/>• Currency normalize P/$→₱<br/>• Email formatter<br/>• Double-word dedup]
@@ -783,11 +785,12 @@ flowchart TD
     POST --> L3
     
     subgraph L3Layer[Layer 3: Gemini Teacher]
-        L3[🤖 Gemini 3.1 Flash Lite<br/>• Single API call<br/>• Receives: L1 rules, L2 flags, glossary<br/>• Corrects remaining errors]
+        L3[🤖 Gemini 3.1 Flash Lite<br/>• Single API call<br/>• Receives: unknown words, glossary<br/>• Corrects remaining errors]
         L3 --> LEARN[📝 AUTO-ADD LEXICON<br/>Gate 1: Blocklist? → Skip<br/>Gate 2: Exists? → Skip<br/>Pass: INSERT as probationary]
     end
     
-    GLOSS --> L3
+    GLOSS -.->|Glossary in prompt| L3
+    L3 -.->|Log corrections| CLOG
     LEARN -.->|Self-Learning Loop| LEX
     L3 --> FIN
     
@@ -799,8 +802,16 @@ flowchart TD
     
     subgraph Output
         OUT[💾 OUTPUT: REFINED TRANSCRIPT<br/>• Saved to DB<br/>• Corrections logged<br/>• N-grams ingested]
-        OUT --> PROMO[⬆️ AUTO-PROMOTION CHECK<br/>occurrences ≥ 3 + not blocklisted?<br/>YES → Promote to PERMANENT<br/>NO → Stay probationary]
     end
+    
+    OUT --> PROMO
+    
+    subgraph SelfLearn[Self-Learning Promotion]
+        PROMO[⬆️ AUTO-PROMOTION CHECK<br/>occurrences ≥ 75 + not blocklisted?<br/>YES → Gemini Audit → PERMANENT<br/>NO → Stay probationary]
+    end
+    
+    CLOG --> PROMO
+    PROMO -.->|Promote to permanent| LEX
 ```
 
 ### Human Override Flow (Trust Erosion)
