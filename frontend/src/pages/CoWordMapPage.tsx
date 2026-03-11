@@ -183,9 +183,9 @@ export default function CoWordMapPage() {
           </div>
         )}
 
-        {/* Hovered node info - appears above cluster legend */}
+        {/* Hovered node info - top right corner */}
         {hoveredNode && (
-          <div className="absolute bottom-24 left-1/2 transform -translate-x-1/2 bg-gray-800/95 border border-gray-600 rounded-lg px-4 py-2 shadow-xl z-30">
+          <div className="absolute top-4 right-4 bg-gray-800/95 border border-gray-600 rounded-lg px-4 py-2 shadow-xl z-30">
             <div className="flex items-center gap-3">
               <span className="w-4 h-4 rounded-full border border-black/30" style={{ backgroundColor: hoveredNode.color }} />
               <span className="font-bold">{hoveredNode.label}</span>
