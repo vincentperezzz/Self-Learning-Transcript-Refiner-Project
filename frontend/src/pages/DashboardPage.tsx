@@ -25,6 +25,7 @@ export default function DashboardPage() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [dateFilter, setDateFilter] = useState<DateFilter>("all");
+  const [searchQuery, setSearchQuery] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
@@ -102,15 +103,26 @@ export default function DashboardPage() {
   // Compute filtered sessions in two stages so status counts reflect the date filter
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  
+  // Past Week: full calendar week BEFORE current week (Sunday-Saturday)
+  const dayOfWeek = now.getDay(); // 0=Sunday
+  const startOfThisWeek = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek);
+  const startOfPastWeek = new Date(startOfThisWeek.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const endOfPastWeek = startOfThisWeek; // exclusive (start of this week)
+  
+  // Past Month: full calendar month BEFORE current month (1st to last day)
+  const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfPastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const endOfPastMonth = startOfThisMonth; // exclusive (start of this month)
 
   const passesDateFilter = (s: SessionSummary) => {
     if (dateFilter === "all") return true;
     const created = new Date(s.created_at);
     if (dateFilter === "today") return created >= startOfToday;
-    if (dateFilter === "week") return created >= oneWeekAgo;
-    if (dateFilter === "month") return created >= oneMonthAgo;
+    // Past week: exclude current week, show only last calendar week
+    if (dateFilter === "week") return created >= startOfPastWeek && created < endOfPastWeek;
+    // Past month: exclude current month, show only last calendar month
+    if (dateFilter === "month") return created >= startOfPastMonth && created < endOfPastMonth;
     return true;
   };
 
@@ -118,22 +130,61 @@ export default function DashboardPage() {
   const dateFilteredSessions = sessions.filter(passesDateFilter);
 
   // Stage 2: apply status filter on top
-  const filteredSessions = dateFilteredSessions.filter(
+  const statusFilteredSessions = dateFilteredSessions.filter(
     (s) => statusFilter === "all" || s.status === statusFilter
   );
+
+  // Stage 3: apply search filter
+  const searchLower = searchQuery.toLowerCase().trim();
+  const filteredSessions = searchLower
+    ? statusFilteredSessions.filter(
+        (s) =>
+          s.filename.toLowerCase().includes(searchLower) ||
+          s.speaker?.toLowerCase().includes(searchLower) ||
+          s.session_key.toLowerCase().includes(searchLower)
+      )
+    : statusFilteredSessions;
 
   const pagedSessions = filteredSessions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold text-white">Past Refinements</h1>
-        <button
-          onClick={() => navigate("/upload")}
-          className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium transition-colors"
-        >
-          + New Upload
-        </button>
+        <div className="flex items-center gap-3 flex-1 justify-end">
+          {/* Search input */}
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search filename..."
+              value={searchQuery}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
+              className="w-56 px-3 py-2 pl-9 bg-gray-800/50 border border-gray-700 rounded-lg text-sm text-white placeholder-gray-500 focus:outline-none focus:border-gray-600"
+            />
+            <svg
+              className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-lg"
+              >
+                ×
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => navigate("/upload")}
+            className="px-4 py-2 rounded-lg bg-sky-600 hover:bg-sky-500 text-sm font-medium transition-colors"
+          >
+            + New Upload
+          </button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -176,8 +227,9 @@ export default function DashboardPage() {
                 if (value === "all") return true;
                 const created = new Date(s.created_at);
                 if (value === "today") return created >= startOfToday;
-                if (value === "week") return created >= oneWeekAgo;
-                if (value === "month") return created >= oneMonthAgo;
+                // Match the main passesDateFilter logic
+                if (value === "week") return created >= startOfPastWeek && created < endOfPastWeek;
+                if (value === "month") return created >= startOfPastMonth && created < endOfPastMonth;
                 return true;
               }).length;
               return (
