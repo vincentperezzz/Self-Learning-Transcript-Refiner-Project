@@ -488,11 +488,19 @@ class CorrectionEngine:
                 rows = cur.fetchall()
 
                 for row in rows:
+                    # Promote lexicon rule
                     conn.execute(
                         "UPDATE lexicon SET is_permanent = TRUE, "
                         "context_hint = COALESCE(context_hint, '') || ' [auto-promoted]' "
                         "WHERE id = %s",
                         (row["id"],),
+                    )
+                    # Also mark correction_log as promoted
+                    conn.execute(
+                        "UPDATE correction_log SET promoted = TRUE "
+                        "WHERE LOWER(original_phrase) = LOWER(%s) "
+                        "AND LOWER(corrected_phrase) = LOWER(%s)",
+                        (row["wrong_phrase"], row["correct_phrase"]),
                     )
                     logger.info(
                         "Auto-promoted lexicon rule #%d: '%s' → '%s'",
