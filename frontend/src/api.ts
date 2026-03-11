@@ -482,3 +482,48 @@ export function updateGlossaryTerm(id: number, payload: { anchor_mode: string; t
 export function deleteGlossaryTerm(id: number) {
   return request<{ deleted: boolean }>(`/glossary/${id}`, { method: "DELETE" });
 }
+
+// ---------------------------------------------------------------------------
+// Co-Word Network
+// ---------------------------------------------------------------------------
+
+export interface CoWordNode {
+  id: string;
+  label: string;
+  size: number;
+  frequency: number;
+  cluster: string;
+  color: string;
+}
+
+export interface CoWordEdge {
+  source: string;
+  target: string;
+  weight: number;
+  width: number;
+}
+
+export interface CoWordCluster {
+  id: string;
+  label: string;
+  color: string;
+  nodeCount: number;
+}
+
+export interface CoWordNetworkData {
+  nodes: CoWordNode[];
+  edges: CoWordEdge[];
+  clusters: CoWordCluster[];
+  stats: {
+    totalNodes: number;
+    totalEdges: number;
+    totalClusters: number;
+    minFrequency: number;
+  };
+}
+
+export function getCoWordNetwork(minFrequency = 50, maxNodes = 150) {
+  return request<CoWordNetworkData>(
+    `/coword-network?min_frequency=${minFrequency}&max_nodes=${maxNodes}`
+  );
+}

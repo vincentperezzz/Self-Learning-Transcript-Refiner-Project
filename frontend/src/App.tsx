@@ -11,6 +11,7 @@ import BlocklistPage from "./pages/BlocklistPage";
 import AnchorsPage from "./pages/AnchorsPage";
 import AccountPage from "./pages/AccountPage";
 import SelfLearningPage from "./pages/SelfLearningPage";
+import CoWordMapPage from "./pages/CoWordMapPage";
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return getToken() ? <>{children}</> : <Navigate to="/login" replace />;
@@ -37,6 +38,7 @@ export default function App() {
           <Route path="anchors" element={<AnchorsPage />} />
           <Route path="ngram" element={<NGramPage />} />
           <Route path="self-learning" element={<SelfLearningPage />} />
+          <Route path="coword-map" element={<CoWordMapPage />} />
           <Route path="account" element={<AccountPage />} />
         </Route>
       </Routes>

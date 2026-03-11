@@ -12,6 +12,7 @@ const NAV = [
   { to: "/anchors", label: "Anchors", icon: "⚓" },
   { to: "/ngram", label: "N-Gram", icon: "🔗" },
   { to: "/self-learning", label: "Self-Learning", icon: "🧠" },
+  { to: "/coword-map", label: "Co-Word Map", icon: "🕸️" },
   { to: "/account", label: "Account", icon: "👤" },
 ];
 

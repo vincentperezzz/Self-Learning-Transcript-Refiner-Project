@@ -1416,6 +1416,176 @@ def delete_glossary_term(
 
 
 # ===================================================================
+# CO-WORD NETWORK MAP
+# ===================================================================
+
+@router.get("/coword-network")
+def get_coword_network(
+    min_frequency: int = Query(50, ge=1, description="Minimum edge frequency to include"),
+    max_nodes: int = Query(150, ge=10, le=500, description="Maximum number of nodes"),
+    _user: dict = Depends(get_current_user),
+) -> dict:
+    """
+    Generate a co-word network map from N-gram data grouped by semantic anchors.
+    
+    Returns nodes (words) and edges (co-occurrence links) with cluster assignments
+    based on matching semantic anchor patterns.
+    """
+    import re
+    from collections import defaultdict
+    
+    with get_db() as conn:
+        # Get semantic anchor patterns for clustering
+        anchors = conn.execute(
+            "SELECT mode, label, pattern FROM semantic_anchors WHERE is_active = TRUE"
+        ).fetchall()
+        
+        # Get N-grams above frequency threshold
+        ngrams = conn.execute(
+            """
+            SELECT word1, word2, word3, frequency 
+            FROM ngram_frequency 
+            WHERE frequency >= %s
+            ORDER BY frequency DESC
+            """,
+            (min_frequency,),
+        ).fetchall()
+    
+    # Build word co-occurrence pairs from trigrams
+    # Each trigram contributes: (w1,w2), (w2,w3), (w1,w3)
+    edge_weights = defaultdict(int)
+    word_freq = defaultdict(int)
+    
+    for ng in ngrams:
+        w1, w2, w3, freq = ng["word1"], ng["word2"], ng["word3"], ng["frequency"]
+        # Create edges
+        pairs = [(w1, w2), (w2, w3), (w1, w3)]
+        for a, b in pairs:
+            key = tuple(sorted([a.lower(), b.lower()]))
+            edge_weights[key] += freq
+        # Track word frequencies
+        for w in [w1, w2, w3]:
+            word_freq[w.lower()] += freq
+    
+    # Get top N words by frequency
+    top_words = sorted(word_freq.items(), key=lambda x: -x[1])[:max_nodes]
+    word_set = {w for w, _ in top_words}
+    
+    # Filter edges to only include top words
+    filtered_edges = {}
+    for (a, b), weight in edge_weights.items():
+        if a in word_set and b in word_set:
+            filtered_edges[(a, b)] = weight
+    
+    # Cluster words by matching anchor patterns
+    anchor_patterns = []
+    for anch in anchors:
+        try:
+            pattern = re.compile(anch["pattern"], re.IGNORECASE)
+            anchor_patterns.append({
+                "mode": anch["mode"],
+                "label": anch["label"],
+                "regex": pattern,
+            })
+        except re.error:
+            continue
+    
+    # Assign clusters to words
+    word_clusters = {}
+    cluster_colors = {
+        "greeting": "#4CAF50",
+        "introduction": "#2196F3",
+        "consent_to_record": "#9C27B0",
+        "verification": "#FF9800",
+        "account_status": "#F44336",
+        "probing_rfd": "#795548",
+        "probing_sof": "#607D8B",
+        "negotiation": "#E91E63",
+        "benefits": "#00BCD4",
+        "consequences": "#FF5722",
+        "ptp_commitment": "#8BC34A",
+        "payment_channel": "#673AB7",
+        "contact_info": "#009688",
+        "recap": "#CDDC39",
+        "empathy": "#FFC107",
+        "objection_handling": "#3F51B5",
+        "closing": "#9E9E9E",
+        "third_party": "#03A9F4",
+        "general": "#757575",
+    }
+    
+    for word in word_set:
+        matched_mode = None
+        # Check if word matches any anchor pattern
+        for ap in anchor_patterns:
+            if ap["regex"].search(word):
+                matched_mode = ap["mode"]
+                break
+        # Also check if word appears in trigram context matching anchors
+        if not matched_mode:
+            for ng in ngrams[:200]:  # Check top 200 trigrams
+                phrase = f"{ng['word1']} {ng['word2']} {ng['word3']}"
+                if word.lower() in phrase.lower():
+                    for ap in anchor_patterns:
+                        if ap["regex"].search(phrase):
+                            matched_mode = ap["mode"]
+                            break
+                if matched_mode:
+                    break
+        word_clusters[word] = matched_mode or "general"
+    
+    # Build response structure for visualization
+    nodes = [
+        {
+            "id": word,
+            "label": word,
+            "size": min(50, max(10, freq // 500)),  # Scale node size
+            "frequency": freq,
+            "cluster": word_clusters.get(word, "general"),
+            "color": cluster_colors.get(word_clusters.get(word, "general"), "#757575"),
+        }
+        for word, freq in top_words
+    ]
+    
+    edges = [
+        {
+            "source": a,
+            "target": b,
+            "weight": weight,
+            "width": min(10, max(1, weight // 1000)),  # Scale edge width
+        }
+        for (a, b), weight in sorted(filtered_edges.items(), key=lambda x: -x[1])[:500]
+    ]
+    
+    # Cluster summary
+    cluster_counts = defaultdict(int)
+    for word, cluster in word_clusters.items():
+        cluster_counts[cluster] += 1
+    
+    clusters = [
+        {
+            "id": mode,
+            "label": mode.replace("_", " ").title(),
+            "color": cluster_colors.get(mode, "#757575"),
+            "nodeCount": count,
+        }
+        for mode, count in sorted(cluster_counts.items(), key=lambda x: -x[1])
+    ]
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "clusters": clusters,
+        "stats": {
+            "totalNodes": len(nodes),
+            "totalEdges": len(edges),
+            "totalClusters": len(clusters),
+            "minFrequency": min_frequency,
+        },
+    }
+
+
+# ===================================================================
 # HEALTH (public)
 # ===================================================================
 
