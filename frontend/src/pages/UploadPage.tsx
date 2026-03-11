@@ -285,7 +285,6 @@ export default function UploadPage() {
             <div className="text-xs text-gray-500 space-y-1">
               <p><span className="text-sky-400 font-mono">Agent:</span> Lines spoken by the agent</p>
               <p><span className="text-emerald-400 font-mono">Client:</span> Lines spoken by the client/borrower</p>
-              <p><span className="text-amber-400 font-mono">Mixed:</span> Overlapping speech or both speakers</p>
             </div>
           </div>
 

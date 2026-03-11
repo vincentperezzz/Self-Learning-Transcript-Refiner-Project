@@ -296,15 +296,15 @@ export default function DashboardPage() {
               onChange={toggleSelectAll}
               className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-sky-500 focus:ring-sky-500 focus:ring-offset-0 cursor-pointer"
             />
-            <div className="grid grid-cols-12 gap-2 flex-1 text-[11px] uppercase tracking-wider text-gray-500">
-              <div className="col-span-3">File</div>
-              <div className="col-span-1">Speaker</div>
-              <div className="col-span-2 text-center">Status</div>
-              <div className="col-span-1 text-center">Segments</div>
-              <div className="col-span-1 text-center">Fixes</div>
-              <div className="col-span-1 text-center">Duration</div>
-              <div className="col-span-2">Date</div>
-              <div className="col-span-1"></div>
+            <div className="flex flex-1 text-[11px] uppercase tracking-wider text-gray-500">
+              <div className="w-[40%] min-w-0">File</div>
+              <div className="w-24">Speaker</div>
+              <div className="w-24 text-center">Status</div>
+              <div className="w-16 text-center">Seg</div>
+              <div className="w-14 text-center">Fixes</div>
+              <div className="w-16 text-center">Time</div>
+              <div className="flex-1 min-w-0">Date</div>
+              <div className="w-10"></div>
             </div>
           </div>
 
@@ -323,27 +323,29 @@ export default function DashboardPage() {
                 className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-sky-500 focus:ring-sky-500 focus:ring-offset-0 cursor-pointer"
               />
               <div
-                className="grid grid-cols-12 gap-2 flex-1 items-center cursor-pointer"
+                className="flex flex-1 items-center cursor-pointer"
                 onClick={() => navigate(`/sessions/${s.session_key}`)}
               >
               {/* File */}
-              <div className="col-span-3 text-sm text-gray-200 truncate font-medium" title={s.filename}>
+              <div className="w-[40%] min-w-0 text-sm text-gray-200 truncate font-medium pr-2" title={s.filename}>
                 {s.filename}
               </div>
 
               {/* Speaker */}
-              <div className="col-span-1 text-sm text-gray-400">
+              <div className="w-24 text-sm text-gray-400">
                 {s.speaker ? (
                   <span
-                    className={`px-2 py-0.5 rounded text-xs ${
+                    className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${
                       s.speaker === "agent"
                         ? "bg-sky-900/40 text-sky-300"
-                        : s.speaker === "mixed"
-                        ? "bg-yellow-900/40 text-yellow-300"
-                        : "bg-emerald-900/40 text-emerald-300"
+                        : s.speaker === "client"
+                        ? "bg-emerald-900/40 text-emerald-300"
+                        : s.speaker === "text"
+                        ? "bg-violet-900/40 text-violet-300"
+                        : "bg-yellow-900/40 text-yellow-300"
                     }`}
                   >
-                    {s.speaker}
+                    {s.speaker === "text" ? "Text Import" : s.speaker}
                   </span>
                 ) : (
                   <span className="text-gray-600">—</span>
@@ -351,9 +353,9 @@ export default function DashboardPage() {
               </div>
 
               {/* Status */}
-              <div className="col-span-2 text-center">
+              <div className="w-24 text-center">
                 {s.status === "processing" ? (
-                  <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full bg-sky-900/40 text-sky-400">
+                  <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-sky-900/40 text-sky-400">
                     <span className="h-1.5 w-1.5 bg-sky-400 rounded-full animate-pulse" />
                     Processing
                   </span>
@@ -369,12 +371,12 @@ export default function DashboardPage() {
               </div>
 
               {/* Segments */}
-              <div className="col-span-1 text-center text-sm text-gray-400">
+              <div className="w-16 text-center text-sm text-gray-400">
                 {s.status === "completed" ? s.total_segments : "—"}
               </div>
 
               {/* Fixes */}
-              <div className="col-span-1 text-center">
+              <div className="w-14 text-center">
                 {s.status === "completed" ? (
                   s.total_corrections > 0 ? (
                     <span className="text-sm text-emerald-400 font-medium">
@@ -389,17 +391,17 @@ export default function DashboardPage() {
               </div>
 
               {/* Duration */}
-              <div className="col-span-1 text-center text-xs text-gray-500 tabular-nums">
+              <div className="w-16 text-center text-xs text-gray-500 tabular-nums">
                 {formatDuration(s.created_at, s.completed_at)}
               </div>
 
               {/* Date */}
-              <div className="col-span-2 text-xs text-gray-500">
+              <div className="flex-1 min-w-0 text-xs text-gray-500 truncate">
                 {new Date(s.created_at).toLocaleString()}
               </div>
 
               {/* Delete */}
-              <div className="col-span-1 text-right">
+              <div className="w-10 text-right">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

@@ -321,7 +321,7 @@ async def import_plain_text(
             "(session_key, filename, speaker, status, processing_stage, user_id) "
             "VALUES (%s, %s, %s, 'processing', 'refinement', %s) "
             "RETURNING id",
-            (session_key, filename, "mixed", user["id"]),
+            (session_key, filename, "text", user["id"]),
         )
         session_id = cur.fetchone()["id"]
 
