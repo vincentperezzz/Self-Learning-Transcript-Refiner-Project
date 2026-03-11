@@ -145,7 +145,7 @@ Anchors use a **context window** — they scan the previous segment, current seg
 
 ---
 
-### Layer 3: Gemini 2.5 Flash (AI Teacher & Corrector)
+### Layer 3: Gemini 3.1 Flash Lite (AI Teacher & Corrector)
 
 **Source badge on UI:** `gemini` (purple)
 
@@ -199,7 +199,7 @@ This is the key design principle — Gemini acts as a **teacher**:
 
 The Gemini model can be changed via environment variable:
 ```
-GEMINI_MODEL=gemini-2.5-flash (default)
+GEMINI_MODEL=gemini-3.1-flash-lite-preview (default)
 GEMINI_MODEL=gemini-3.1-flash-lite-preview (lower cost)
 GEMINI_MODEL=gemini-2.0-flash-lite (high volume)
 ```
@@ -356,7 +356,7 @@ The new correction from the human-guided Gemini call is always inserted as a **p
 Users can manually correct individual segments using the "Correct with Gemini" button on the Session Detail page:
 
 1. User clicks the sparkle button on a segment and types a natural-language instruction
-2. The instruction + segment text are sent to Gemini 2.5 Flash via a dedicated prompt template
+2. The instruction + segment text are sent to Gemini 3.1 Flash Lite via a dedicated prompt template
 3. Gemini returns the corrected text and a list of changes
 4. The correction is:
    - **Applied** to the session result in the database
@@ -783,11 +783,12 @@ flowchart TD
     POST --> L3
     
     subgraph L3Layer[Layer 3: Gemini Teacher]
-        L3[🤖 GEMINI 2.5 FLASH<br/>• Single API call<br/>• Receives: L1 rules, L2 flags, glossary<br/>• Corrects remaining errors]
+        L3[🤖 Gemini 3.1 Flash Lite<br/>• Single API call<br/>• Receives: L1 rules, L2 flags, glossary<br/>• Corrects remaining errors]
         L3 --> LEARN[📝 AUTO-ADD LEXICON<br/>Gate 1: Blocklist? → Skip<br/>Gate 2: Exists? → Skip<br/>Pass: INSERT as probationary]
     end
     
     GLOSS --> L3
+    LEARN -.->|Self-Learning Loop| LEX
     L3 --> FIN
     
     subgraph FinalPass[Pass 2: Final Classification]
@@ -886,7 +887,7 @@ flowchart TD
 |---|---|---|
 | `LOW_CONFIDENCE_THRESHOLD` | `0.80` | Whisper words below this probability are flagged as low-confidence |
 | `CORRECTION_THRESHOLD` | `5` | Number of occurrences needed for Rule-of-5 promotion |
-| `GEMINI_API_KEY` | — | Google Gemini 2.5 Flash API key |
+| `GEMINI_API_KEY` | — | Google Gemini 3.1 Flash Lite API key |
 | `GROQ_API_KEY` | — | Groq API key for Whisper transcription |
 | `DATABASE_URL` | `postgresql://phoenix:phoenix@localhost:5432/phoenix` | PostgreSQL connection |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis cache connection |
@@ -896,7 +897,7 @@ flowchart TD
 - **Backend:** FastAPI (Python 3.12), uvicorn
 - **Database:** PostgreSQL 16, Redis 7 (caching)
 - **Whisper:** Groq API (whisper-large-v3-turbo)
-- **AI Corrector:** Gemini 2.5 Flash (transcript correction + auto-learning)
+- **AI Corrector:** Gemini 3.1 Flash Lite (transcript correction + auto-learning)
 - **Frontend:** React 18, TypeScript, Tailwind CSS, Vite
 - **Auth:** JWT (HS256) + bcrypt
 - **Deployment:** Docker Compose (5 containers: postgres, redis, backend, frontend, pgadmin)
