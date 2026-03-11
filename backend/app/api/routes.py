@@ -714,6 +714,8 @@ def ban_lexicon_rule(
             (row["wrong_phrase"], row["correct_phrase"], reason or None),
         )
 
+        # Keep correction_log entry so it shows "Blocklisted" status
+
         # Delete the rule
         conn.execute("DELETE FROM lexicon WHERE id = %s", (rule_id,))
 
@@ -768,6 +770,7 @@ def add_blocklist_rule(
             "ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING",
             (wrong, correct, reason or None),
         )
+        # Keep correction_log entry so it shows "Blocklisted" status
     return {"status": "created", "wrong_phrase": wrong, "correct_phrase": correct}
 
 
@@ -776,14 +779,25 @@ def unban_blocklist_rule(
     blocklist_id: int,
     _user: dict = Depends(get_current_user),
 ) -> dict:
-    """Remove a correction pair from the blocklist (unban)."""
+    """Remove a correction pair from the blocklist (unban) and delete from correction_log."""
     with get_db() as conn:
+        # First get the phrases before deleting
         cur = conn.execute(
-            "DELETE FROM lexicon_blocklist WHERE id = %s RETURNING id", (blocklist_id,)
+            "SELECT wrong_phrase, correct_phrase FROM lexicon_blocklist WHERE id = %s",
+            (blocklist_id,),
         )
         row = cur.fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail="Blocklist entry not found")
+        if not row:
+            raise HTTPException(status_code=404, detail="Blocklist entry not found")
+        
+        # Delete from blocklist
+        conn.execute("DELETE FROM lexicon_blocklist WHERE id = %s", (blocklist_id,))
+        
+        # Also delete from correction_log so Gemini can re-suggest fresh
+        conn.execute(
+            "DELETE FROM correction_log WHERE LOWER(original_phrase) = LOWER(%s) AND LOWER(corrected_phrase) = LOWER(%s)",
+            (row["wrong_phrase"], row["correct_phrase"]),
+        )
     return {"status": "unbanned"}
 
 
@@ -825,6 +839,7 @@ def downvote_correction(
                     "ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING",
                     (original, corrected, reason, user["username"]),
                 )
+                # Keep correction_log entry so it shows "Blocklisted" status
                 results["blocklisted"] = True
             except Exception:
                 pass  # Already blocklisted
@@ -1068,14 +1083,20 @@ async def auto_promote(user: dict = Depends(get_current_user)) -> dict:
 
 @router.get("/corrections/log")
 def correction_log(_user: dict = Depends(get_current_user)) -> dict:
-    """Return the full correction log for visibility."""
+    """Return the full correction log for visibility with blocklist status."""
     with get_db() as conn:
         cur = conn.execute(
-            "SELECT original_phrase, corrected_phrase, source, occurrences, "
-            "promoted, last_seen_at "
-            "FROM correction_log "
-            "ORDER BY occurrences DESC "
-            "LIMIT 500"
+            """
+            SELECT cl.original_phrase, cl.corrected_phrase, cl.source, cl.occurrences,
+                   cl.promoted, cl.last_seen_at,
+                   CASE WHEN bl.id IS NOT NULL THEN TRUE ELSE FALSE END AS blocklisted
+            FROM correction_log cl
+            LEFT JOIN lexicon_blocklist bl 
+              ON LOWER(bl.wrong_phrase) = LOWER(cl.original_phrase)
+             AND LOWER(bl.correct_phrase) = LOWER(cl.corrected_phrase)
+            ORDER BY cl.occurrences DESC
+            LIMIT 500
+            """
         )
         rows = cur.fetchall()
     return {"entries": [dict(r) for r in rows], "promotion_threshold": 3}

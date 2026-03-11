@@ -8,6 +8,7 @@ interface LogEntry {
   source: string;
   occurrences: number;
   promoted: boolean;
+  blocklisted?: boolean;  
   last_seen_at: string;
 }
 
@@ -15,6 +16,7 @@ export default function SelfLearningPage() {
   const [logEntries, setLogEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");  
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const [promotionThreshold, setPromotionThreshold] = useState(3);
@@ -41,11 +43,27 @@ export default function SelfLearningPage() {
     return acc;
   }, {});
 
-  const filtered = filter === "all" ? logEntries : logEntries.filter((e) => e.source === filter);
+  const filtered = logEntries.filter((e) => {
+    // Source filter
+    if (filter !== "all" && e.source !== filter) return false;
+    // Status filter
+    if (statusFilter === "probationary" && (e.promoted || e.blocklisted)) return false;
+    if (statusFilter === "promoted" && !e.promoted) return false;
+    if (statusFilter === "blocklisted" && !e.blocklisted) return false;
+    return true;
+  });
 
   const paged = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   function statusBadge(entry: LogEntry) {
+    // Show blocklisted status first (takes priority)
+    if (entry.blocklisted) {
+      return (
+        <span className="text-xs bg-red-900/50 text-red-400 px-2 py-0.5 rounded-full">
+          Blocklisted
+        </span>
+      );
+    }
     if (entry.source === "lexicon") {
       return (
         <span className="text-xs bg-blue-900/50 text-blue-400 px-2 py-0.5 rounded-full">
@@ -83,7 +101,7 @@ export default function SelfLearningPage() {
       {/* Source filter cards */}
       <div className="flex gap-3">
         <button
-          onClick={() => { setFilter("all"); setCurrentPage(1); }}
+          onClick={() => { setFilter("all"); setStatusFilter("all"); setCurrentPage(1); }}
           className={`flex-1 rounded-lg border p-3 text-center transition-colors ${
             filter === "all"
               ? "bg-gray-700/60 border-gray-500"
@@ -100,7 +118,7 @@ export default function SelfLearningPage() {
         ].map((s) => (
           <button
             key={s.key}
-            onClick={() => { setFilter(filter === s.key ? "all" : s.key); setCurrentPage(1); }}
+            onClick={() => { setFilter(filter === s.key ? "all" : s.key); setStatusFilter("all"); setCurrentPage(1); }}
             className={`flex-1 rounded-lg border p-3 text-center transition-colors ${
               filter === s.key
                 ? "bg-gray-700/60 border-gray-500"
@@ -114,6 +132,31 @@ export default function SelfLearningPage() {
           </button>
         ))}
       </div>
+
+      {/* Status filter (only show when Gemini or N-Gram selected) */}
+      {(filter === "gemini" || filter === "ngram_anchor") && (
+        <div className="flex gap-2 items-center">
+          <span className="text-xs text-gray-500 mr-2">Status:</span>
+          {[
+            { key: "all", label: "All", color: "gray" },
+            { key: "probationary", label: "Probationary", color: "amber" },
+            { key: "promoted", label: "Promoted", color: "emerald" },
+            { key: "blocklisted", label: "Blocklisted", color: "red" },
+          ].map((s) => (
+            <button
+              key={s.key}
+              onClick={() => { setStatusFilter(statusFilter === s.key ? "all" : s.key); setCurrentPage(1); }}
+              className={`text-xs px-3 py-1 rounded-full transition-colors ${
+                statusFilter === s.key
+                  ? `bg-${s.color}-900/60 text-${s.color}-400 border border-${s.color}-700`
+                  : "bg-gray-800/40 text-gray-400 border border-gray-700 hover:border-gray-600"
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Table */}
       {loading ? (
