@@ -518,12 +518,12 @@ class CorrectionEngine:
     )
 
     # Regex: standalone comma-formatted amounts without any currency prefix
-    # Matches patterns like "34,847.72" or "6,828.13" (thousands with comma)
+    # Matches patterns like "34,847.72" or "3,535.3" (thousands with comma)
     # but NOT preceded by ₱, P, $, or a letter
     _BARE_AMOUNT_RE = re.compile(
         r'(?<![₱P$a-zA-Z])'        # not preceded by currency or letter
         r'(?<!\d)'                   # not preceded by another digit
-        r'(\d{1,3}(?:,\d{3})+\.\d{2})'  # comma-formatted: 1,000.00 or 34,847.72
+        r'(\d{1,3}(?:,\d{3})+\.(\d{1,2}))'  # comma-formatted: 1,000.00 or 3,535.3
         r'(?!\d)'                    # not followed by another digit
     )
 
@@ -543,7 +543,16 @@ class CorrectionEngine:
             )
 
         # Pass 2: Prepend ₱ to bare comma-formatted amounts (Whisper dropped prefix)
-        text2 = self._BARE_AMOUNT_RE.sub(r"₱\1", new_text)
+        # Also normalize decimals to 2 places (3,535.3 → ₱3,535.30)
+        def _normalize_amount(m: re.Match) -> str:
+            full_amount = m.group(1)  # e.g., "3,535.3"
+            decimals = m.group(2)     # e.g., "3"
+            if len(decimals) == 1:
+                # Normalize to 2 decimal places
+                return f"₱{full_amount}0"
+            return f"₱{full_amount}"
+
+        text2 = self._BARE_AMOUNT_RE.sub(_normalize_amount, new_text)
         if text2 != new_text:
             details.append(
                 CorrectionDetail(
