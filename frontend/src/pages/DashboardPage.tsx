@@ -297,16 +297,16 @@ export default function DashboardPage() {
               className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-sky-500 focus:ring-sky-500 focus:ring-offset-0 cursor-pointer"
             />
             <div className="flex flex-1 text-[11px] uppercase tracking-wider text-gray-500">
-              <div className="w-[35%] min-w-0">File</div>
-              <div className="w-20">Speaker</div>
+              <div className="flex-1 min-w-0">File</div>
+              <div className="w-20 text-center">Speaker</div>
               <div className="w-24 text-center">Status</div>
               <div className="w-14 text-center">Seg</div>
               <div className="w-14 text-center">Fixes</div>
               <div className="w-16 text-center">Tokens</div>
               <div className="w-14 text-center">Time</div>
-              <div className="flex-1 min-w-0">Date</div>
-              <div className="w-10"></div>
+              <div className="w-40">Date</div>
             </div>
+            <div className="w-10"></div>
           </div>
 
           {/* Rows */}
@@ -328,12 +328,12 @@ export default function DashboardPage() {
                 onClick={() => navigate(`/sessions/${s.session_key}`)}
               >
               {/* File */}
-              <div className="w-[35%] min-w-0 text-sm text-gray-200 truncate font-medium pr-2" title={s.filename}>
+              <div className="flex-1 min-w-0 text-sm text-gray-200 truncate font-medium pr-2" title={s.filename}>
                 {s.filename}
               </div>
 
               {/* Speaker */}
-              <div className="w-20 text-sm text-gray-400">
+              <div className="w-20 text-center text-sm text-gray-400">
                 {s.speaker ? (
                   <span
                     className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${
@@ -412,11 +412,12 @@ export default function DashboardPage() {
               </div>
 
               {/* Date */}
-              <div className="flex-1 min-w-0 text-xs text-gray-500 truncate">
+              <div className="w-40 text-xs text-gray-500">
                 {new Date(s.created_at).toLocaleString()}
               </div>
+              </div>
 
-              {/* Delete */}
+              {/* Delete - outside clickable div */}
               <div className="w-10 text-right">
                 <button
                   onClick={(e) => {
@@ -431,7 +432,6 @@ export default function DashboardPage() {
                   </svg>
                 </button>
               </div>
-            </div>
             </div>
           ))}
         </div>
