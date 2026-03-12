@@ -164,6 +164,25 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_key ON transcription_sessions(ses
 CREATE INDEX IF NOT EXISTS idx_anchor_patterns_mode ON semantic_anchors(mode);
 CREATE INDEX IF NOT EXISTS idx_anchor_overrides_session ON anchor_overrides(session_id);
 CREATE INDEX IF NOT EXISTS idx_domain_glossary_mode ON domain_glossary(anchor_mode);
+
+-- Gemini API Call Logs (for accurate rate limit tracking)
+CREATE TABLE IF NOT EXISTS gemini_api_logs (
+    id                SERIAL PRIMARY KEY,
+    user_id           INTEGER REFERENCES users(id),
+    session_id        INTEGER REFERENCES transcription_sessions(id) ON DELETE SET NULL,
+    call_type         TEXT    NOT NULL DEFAULT 'correction',  -- 'correction', 'audit', 'validation'
+    model             TEXT    NOT NULL,
+    prompt_tokens     INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens      INTEGER NOT NULL DEFAULT 0,
+    success           BOOLEAN NOT NULL DEFAULT TRUE,
+    error_message     TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_gemini_logs_user ON gemini_api_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_gemini_logs_created ON gemini_api_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_gemini_logs_user_created ON gemini_api_logs(user_id, created_at);
 """
 
 
@@ -208,6 +227,21 @@ def init_db() -> None:
                 ) THEN
                     ALTER TABLE transcription_sessions
                         ADD COLUMN completed_at TIMESTAMPTZ;
+                END IF;
+            END $$;
+        """)
+        # Migration: add token tracking columns
+        conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'transcription_sessions' AND column_name = 'tokens_used'
+                ) THEN
+                    ALTER TABLE transcription_sessions
+                        ADD COLUMN tokens_used INTEGER NOT NULL DEFAULT 0,
+                        ADD COLUMN prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                        ADD COLUMN completion_tokens INTEGER NOT NULL DEFAULT 0;
                 END IF;
             END $$;
         """)

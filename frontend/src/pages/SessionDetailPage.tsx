@@ -254,6 +254,16 @@ export default function SessionDetailPage() {
               {session.total_segments} segments &middot;{" "}
               {session.total_corrections} corrections ({correctedCount} segments
               changed)
+              {session.tokens_used > 0 && (
+                <>
+                  {" "}&middot;{" "}
+                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-violet-900/40 text-violet-400 text-[10px] font-medium" title={`Prompt: ${session.prompt_tokens?.toLocaleString() || 0}, Completion: ${session.completion_tokens?.toLocaleString() || 0}`}>
+                    {session.tokens_used >= 1000 
+                      ? `${(session.tokens_used / 1000).toFixed(1)}K tokens` 
+                      : `${session.tokens_used} tokens`}
+                  </span>
+                </>
+              )}
               {session.completed_at && (
                 <>
                   {" "}&middot;{" "}

@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from typing import Optional
 
 import httpx
 
@@ -195,6 +196,46 @@ class GeminiCorrection:
     corrected: str
 
 
+@dataclass
+class TokenUsage:
+    """Token usage from a Gemini API call."""
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+def log_gemini_call(
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+    call_type: str = "correction",
+    model: str = "",
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    total_tokens: int = 0,
+    success: bool = True,
+    error_message: Optional[str] = None,
+) -> None:
+    """Log a Gemini API call to the database for rate limit tracking."""
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO gemini_api_logs (
+                    user_id, session_id, call_type, model,
+                    prompt_tokens, completion_tokens, total_tokens,
+                    success, error_message
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id, session_id, call_type, model or GEMINI_MODEL,
+                    prompt_tokens, completion_tokens, total_tokens,
+                    success, error_message
+                ),
+            )
+    except Exception as e:
+        logger.warning("Failed to log Gemini API call: %s", e)
+
+
 def _fetch_lexicon_rules() -> list[dict]:
     """Load current lexicon rules from DB for inclusion in the Gemini prompt."""
     try:
@@ -230,7 +271,9 @@ def correct_transcript_sync(
     low_confidence_words: list[dict] | None = None,
     applied_rules: list[tuple[str, str]] | None = None,
     unknown_words: list[dict] | None = None,
-) -> list[GeminiCorrection]:
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
+) -> tuple[list[GeminiCorrection], TokenUsage]:
     """
     Send the full transcript to Gemini for correction analysis.
 
@@ -241,11 +284,11 @@ def correct_transcript_sync(
         unknown_words: Optional list of {segment_index, word} for words not found in the N-gram corpus
 
     Returns:
-        List of GeminiCorrection objects
+        Tuple of (list of GeminiCorrection objects, TokenUsage)
     """
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY not set — skipping Gemini correction layer")
-        return []
+        return [], TokenUsage()
 
     # Build transcript text for the prompt (include anchor mode and context if available)
     transcript_lines = []
@@ -335,6 +378,14 @@ def correct_transcript_sync(
             resp.raise_for_status()
             data = resp.json()
 
+        # Extract token usage from response
+        usage_metadata = data.get("usageMetadata", {})
+        token_usage = TokenUsage(
+            prompt_tokens=usage_metadata.get("promptTokenCount", 0),
+            completion_tokens=usage_metadata.get("candidatesTokenCount", 0),
+            total_tokens=usage_metadata.get("totalTokenCount", 0),
+        )
+
         # Extract response text
         text = (
             data.get("candidates", [{}])[0]
@@ -353,7 +404,7 @@ def correct_transcript_sync(
         corrections_raw = json.loads(text)
         if not isinstance(corrections_raw, list):
             logger.warning("Gemini returned non-list: %s", type(corrections_raw))
-            return []
+            return [], token_usage
 
         corrections = []
         for item in corrections_raw:
@@ -371,18 +422,51 @@ def correct_transcript_sync(
                     )
                 )
 
-        logger.info("Gemini suggested %d corrections", len(corrections))
-        return corrections
+        logger.info("Gemini suggested %d corrections (tokens: %d)", len(corrections), token_usage.total_tokens)
+        
+        # Log the successful API call
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="correction",
+            prompt_tokens=token_usage.prompt_tokens,
+            completion_tokens=token_usage.completion_tokens,
+            total_tokens=token_usage.total_tokens,
+            success=True,
+        )
+        
+        return corrections, token_usage
 
     except httpx.HTTPStatusError as e:
         logger.error("Gemini API error %d: %s", e.response.status_code, e.response.text[:300])
-        return []
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="correction",
+            success=False,
+            error_message=f"HTTP {e.response.status_code}",
+        )
+        return [], TokenUsage()
     except json.JSONDecodeError as e:
         logger.error("Gemini returned invalid JSON: %s", e)
-        return []
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="correction",
+            success=False,
+            error_message="Invalid JSON response",
+        )
+        return [], TokenUsage()
     except Exception as e:
         logger.error("Gemini corrector error: %s", e, exc_info=True)
-        return []
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="correction",
+            success=False,
+            error_message=str(e),
+        )
+        return [], TokenUsage()
 
 
 # ---------------------------------------------------------------------------
@@ -419,16 +503,18 @@ RESPOND WITH ONLY THE JSON OBJECT. No explanation, no markdown fencing."""
 def correct_segment_with_instruction(
     segment_text: str,
     user_instruction: str,
+    user_id: Optional[int] = None,
+    session_id: Optional[int] = None,
 ) -> dict:
     """
     Send a single segment + human instruction to Gemini for targeted correction.
 
-    Returns dict with keys: corrected_text, changes (list of {original, corrected})
+    Returns dict with keys: corrected_text, changes (list of {original, corrected}), tokens_used
     On API errors, also returns 'error' key with the error message.
     """
     if not GEMINI_API_KEY:
         logger.warning("GEMINI_API_KEY not set")
-        return {"corrected_text": segment_text, "changes": [], "error": "GEMINI_API_KEY not configured"}
+        return {"corrected_text": segment_text, "changes": [], "tokens_used": 0, "error": "GEMINI_API_KEY not configured"}
 
     prompt = _HUMAN_CORRECT_PROMPT.format(
         segment_text=segment_text,
@@ -449,6 +535,12 @@ def correct_segment_with_instruction(
             resp.raise_for_status()
             data = resp.json()
 
+        # Extract token usage
+        usage_metadata = data.get("usageMetadata", {})
+        prompt_tokens = usage_metadata.get("promptTokenCount", 0)
+        completion_tokens = usage_metadata.get("candidatesTokenCount", 0)
+        total_tokens = usage_metadata.get("totalTokenCount", 0)
+
         text = (
             data.get("candidates", [{}])[0]
             .get("content", {})
@@ -465,21 +557,57 @@ def correct_segment_with_instruction(
         result = json.loads(text)
         if not isinstance(result, dict) or "corrected_text" not in result:
             logger.warning("Gemini human-correct returned unexpected format")
-            return {"corrected_text": segment_text, "changes": []}
+            log_gemini_call(
+                user_id=user_id,
+                session_id=session_id,
+                call_type="human_correction",
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                total_tokens=total_tokens,
+                success=True,
+            )
+            return {"corrected_text": segment_text, "changes": [], "tokens_used": total_tokens}
 
+        # Log successful call
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="human_correction",
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            success=True,
+        )
+        
+        result["tokens_used"] = total_tokens
         return result
 
     except httpx.HTTPStatusError as e:
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="human_correction",
+            success=False,
+            error_message=f"HTTP {e.response.status_code}",
+        )
         if e.response.status_code == 429:
             logger.error("Gemini API rate limit exceeded (429)")
             return {
                 "corrected_text": segment_text,
                 "changes": [],
+                "tokens_used": 0,
                 "error": "Gemini API rate limit exceeded. Please wait a few minutes and try again.",
             }
         logger.error("Gemini human-correct HTTP error: %s", e, exc_info=True)
-        return {"corrected_text": segment_text, "changes": [], "error": f"Gemini API error: {e.response.status_code}"}
+        return {"corrected_text": segment_text, "changes": [], "tokens_used": 0, "error": f"Gemini API error: {e.response.status_code}"}
 
     except Exception as e:
         logger.error("Gemini human-correct error: %s", e, exc_info=True)
-        return {"corrected_text": segment_text, "changes": [], "error": str(e)}
+        log_gemini_call(
+            user_id=user_id,
+            session_id=session_id,
+            call_type="human_correction",
+            success=False,
+            error_message=str(e),
+        )
+        return {"corrected_text": segment_text, "changes": [], "tokens_used": 0, "error": str(e)}

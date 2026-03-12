@@ -148,7 +148,7 @@ async def transcribe_and_refine(
 
     # Process in background (sync — runs in thread pool)
     background_tasks.add_task(
-        _process_transcription_sync, session_id, audio_bytes, filename, speaker, language
+        _process_transcription_sync, session_id, user["id"], audio_bytes, filename, speaker, language
     )
 
     return {"session_key": session_key, "status": "processing"}
@@ -156,6 +156,7 @@ async def transcribe_and_refine(
 
 def _process_transcription_sync(
     session_id: int,
+    user_id: int,
     audio_bytes: bytes,
     filename: str,
     speaker: Optional[str],
@@ -186,24 +187,28 @@ def _process_transcription_sync(
         # Stage 2: Lexicon + N-Gram correction
         _set_stage("lexicon")
         request = RefinementRequest(segments=segments, speaker=speaker)
-        result = _engine.refine(request, on_stage=_set_stage)
+        result = _engine.refine(request, on_stage=_set_stage, user_id=user_id, session_id=session_id)
         result_dict = result.model_dump(mode="json")
 
         with get_db() as conn:
             conn.execute(
                 "UPDATE transcription_sessions "
                 "SET status = 'completed', processing_stage = NULL, total_segments = %s, "
-                "total_corrections = %s, result_json = %s, completed_at = now() "
+                "total_corrections = %s, tokens_used = %s, prompt_tokens = %s, "
+                "completion_tokens = %s, result_json = %s, completed_at = now() "
                 "WHERE id = %s",
                 (
                     len(result.segments),
                     result.total_corrections,
+                    result.tokens_used,
+                    result.prompt_tokens,
+                    result.completion_tokens,
                     json.dumps(result_dict),
                     session_id,
                 ),
             )
-        log.info("BG task completed for session %s: %d segments, %d corrections",
-                 session_id, len(result.segments), result.total_corrections)
+        log.info("BG task completed for session %s: %d segments, %d corrections, %d tokens",
+                 session_id, len(result.segments), result.total_corrections, result.tokens_used)
     except Exception as exc:
         log.error("Transcription failed for session %s: %s", session_id, exc, exc_info=True)
         with get_db() as conn:
@@ -218,9 +223,9 @@ def _process_transcription_sync(
 @router.post("/refine", response_model=RefinementResponse)
 def refine_transcript(
     payload: RefinementRequest,
-    _user: dict = Depends(get_current_user),
+    user: dict = Depends(get_current_user),
 ) -> RefinementResponse:
-    return _engine.refine(payload)
+    return _engine.refine(payload, user_id=user["id"])
 
 
 # ===================================================================
@@ -329,6 +334,7 @@ async def import_plain_text(
     background_tasks.add_task(
         _process_text_import,
         session_id,
+        user["id"],
         session_key,
         segments,
     )
@@ -338,6 +344,7 @@ async def import_plain_text(
 
 def _process_text_import(
     session_id: int,
+    user_id: int,
     session_key: str,
     segments: list[TranscriptSegment],
 ):
@@ -358,7 +365,7 @@ def _process_text_import(
         # Build refinement request (already at 'refinement' stage, skipping whisper)
         _set_stage("lexicon")
         request = RefinementRequest(segments=segments, speaker="mixed")
-        result = _engine.refine(request, on_stage=_set_stage)
+        result = _engine.refine(request, on_stage=_set_stage, user_id=user_id, session_id=session_id)
 
         # Save result
         result_data = {
@@ -400,14 +407,118 @@ def list_sessions(user: dict = Depends(get_current_user)) -> dict:
     with get_db() as conn:
         cur = conn.execute(
             "SELECT id, session_key, filename, speaker, status, processing_stage, "
-            "total_segments, total_corrections, created_at, completed_at "
+            "total_segments, total_corrections, tokens_used, prompt_tokens, "
+            "completion_tokens, result_json, created_at, completed_at "
             "FROM transcription_sessions "
             "WHERE user_id = %s "
             "ORDER BY created_at DESC",
             (user["id"],),
         )
         rows = cur.fetchall()
-    return {"sessions": [dict(r) for r in rows]}
+    
+    sessions = []
+    for r in rows:
+        s = dict(r)
+        # Fallback: if tokens_used is 0 but result_json has token data, use that
+        if s.get("tokens_used", 0) == 0 and s.get("result_json"):
+            result_json = s["result_json"]
+            if isinstance(result_json, str):
+                try:
+                    result_json = json.loads(result_json)
+                except:
+                    result_json = {}
+            if result_json.get("tokens_used", 0) > 0:
+                s["tokens_used"] = result_json.get("tokens_used", 0)
+                s["prompt_tokens"] = result_json.get("prompt_tokens", 0)
+                s["completion_tokens"] = result_json.get("completion_tokens", 0)
+        # Remove result_json from list response (too large)
+        s.pop("result_json", None)
+        sessions.append(s)
+    
+    return {"sessions": sessions}
+
+
+@router.get("/token-stats")
+def get_token_stats(user: dict = Depends(get_current_user)) -> dict:
+    """Get token usage statistics from gemini_api_logs for accurate RPM/TPM/RPD tracking."""
+    from datetime import date, datetime, timedelta
+    
+    now = datetime.now()
+    today = date.today()
+    one_minute_ago = now - timedelta(minutes=1)
+    
+    with get_db() as conn:
+        # Get all-time stats from logs
+        cur = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as total_requests,
+                COALESCE(SUM(total_tokens), 0) as total_tokens,
+                COALESCE(SUM(prompt_tokens), 0) as total_prompt,
+                COALESCE(SUM(completion_tokens), 0) as total_completion,
+                COUNT(*) FILTER (WHERE success = true) as successful_requests
+            FROM gemini_api_logs 
+            WHERE user_id = %s
+            """,
+            (user["id"],),
+        )
+        all_time = cur.fetchone()
+        
+        # Get today's stats
+        cur = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as requests_today,
+                COALESCE(SUM(total_tokens), 0) as tokens_today
+            FROM gemini_api_logs 
+            WHERE user_id = %s AND DATE(created_at) = %s AND success = true
+            """,
+            (user["id"], today),
+        )
+        daily = cur.fetchone()
+        
+        # Get last minute stats (RPM & TPM)
+        cur = conn.execute(
+            """
+            SELECT 
+                COUNT(*) as requests_per_minute,
+                COALESCE(SUM(total_tokens), 0) as tokens_per_minute
+            FROM gemini_api_logs 
+            WHERE user_id = %s AND created_at >= %s AND success = true
+            """,
+            (user["id"], one_minute_ago),
+        )
+        per_minute = cur.fetchone()
+        
+        # Get sessions with gemini (from sessions table)
+        cur = conn.execute(
+            "SELECT COUNT(*) as total FROM transcription_sessions WHERE user_id = %s",
+            (user["id"],),
+        )
+        sessions = cur.fetchone()
+    
+    # Gemini 3.1 Flash Lite limits
+    rpm_limit = 15  # Requests per minute
+    tpm_limit = 250_000  # Tokens per minute
+    rpd_limit = 500  # Requests per day
+    
+    return {
+        # All-time stats
+        "total_tokens": all_time["total_tokens"] if all_time else 0,
+        "total_prompt_tokens": all_time["total_prompt"] if all_time else 0,
+        "total_completion_tokens": all_time["total_completion"] if all_time else 0,
+        "total_sessions": sessions["total"] if sessions else 0,
+        "sessions_with_gemini": all_time["successful_requests"] if all_time else 0,
+        # Per-minute stats (RPM & TPM)
+        "requests_per_minute": per_minute["requests_per_minute"] if per_minute else 0,
+        "tokens_per_minute": per_minute["tokens_per_minute"] if per_minute else 0,
+        "rpm_limit": rpm_limit,
+        "tpm_limit": tpm_limit,
+        # Daily stats (RPD)
+        "requests_today": daily["requests_today"] if daily else 0,
+        "tokens_today": daily["tokens_today"] if daily else 0,
+        "rpd_limit": rpd_limit,
+    }
 
 
 @router.get("/sessions/{session_key}")
@@ -415,6 +526,7 @@ def get_session(session_key: str, user: dict = Depends(get_current_user)) -> dic
     with get_db() as conn:
         cur = conn.execute(
             "SELECT id, session_key, filename, speaker, status, processing_stage, total_segments, total_corrections, "
+            "tokens_used, prompt_tokens, completion_tokens, "
             "result_json, error_message, created_at, completed_at "
             "FROM transcription_sessions "
             "WHERE session_key = %s AND user_id = %s",
@@ -427,6 +539,16 @@ def get_session(session_key: str, user: dict = Depends(get_current_user)) -> dic
     # Ensure result_json is parsed (PG may return it as a string)
     if isinstance(out.get("result_json"), str):
         out["result_json"] = json.loads(out["result_json"])
+    
+    # Fallback: if tokens_used is 0 but result_json has token data, use that
+    # (for backwards compatibility with sessions processed before token tracking)
+    if out.get("tokens_used", 0) == 0 and out.get("result_json"):
+        result = out["result_json"]
+        if result.get("tokens_used", 0) > 0:
+            out["tokens_used"] = result.get("tokens_used", 0)
+            out["prompt_tokens"] = result.get("prompt_tokens", 0)
+            out["completion_tokens"] = result.get("completion_tokens", 0)
+    
     return out
 
 
@@ -477,7 +599,12 @@ def correct_segment(
     original_text = seg["refined_text"]
 
     # Call Gemini with user instruction
-    gemini_result = correct_segment_with_instruction(original_text, instruction)
+    gemini_result = correct_segment_with_instruction(
+        original_text, 
+        instruction,
+        user_id=user["id"],
+        session_id=row["id"],
+    )
 
     # Check for API errors (e.g., rate limit)
     if "error" in gemini_result:

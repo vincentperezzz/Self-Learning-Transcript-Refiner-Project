@@ -21,6 +21,7 @@ from typing import Optional
 import httpx
 
 from app.config import GEMINI_API_KEY, GEMINI_MODEL
+from app.core.gemini_corrector import log_gemini_call
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,7 @@ class AuditResult:
     corrected: str
     approved: bool
     reason: str
+    tokens_used: int = 0
 
 
 def _build_context_window(
@@ -118,6 +120,7 @@ async def audit_candidate(
     source: str,
     occurrences: int,
     context_texts: Optional[list[str]] = None,
+    user_id: Optional[int] = None,
 ) -> AuditResult:
     """
     Send a promotion candidate to Gemini 2.5 Flash for validation.
@@ -128,6 +131,7 @@ async def audit_candidate(
         source: Which layer produced this correction (lexicon/ngram/distilbert)
         occurrences: How many times this correction has been seen
         context_texts: Optional list of full text snippets where the correction occurred
+        user_id: Optional user ID for rate limit tracking
 
     Returns:
         AuditResult with approved=True/False and reason
@@ -185,6 +189,10 @@ async def audit_candidate(
             resp.raise_for_status()
             data = resp.json()
 
+        # Extract token usage
+        usage_metadata = data.get("usageMetadata", {})
+        tokens_used = usage_metadata.get("totalTokenCount", 0)
+
         # Extract the text response (skip "thinking" parts from Gemini 2.5)
         parts = data["candidates"][0]["content"]["parts"]
         text = ""
@@ -201,10 +209,20 @@ async def audit_candidate(
         reason = str(result.get("reason", "No reason provided"))
 
         logger.info(
-            "Gemini audit: '%s' → '%s' : %s (%s)",
+            "Gemini audit: '%s' → '%s' : %s (%s) [tokens: %d]",
             original, corrected,
             "APPROVED" if approved else "REJECTED",
-            reason,
+            reason, tokens_used,
+        )
+
+        # Log the API call for rate limit tracking
+        log_gemini_call(
+            user_id=user_id,
+            call_type="audit",
+            prompt_tokens=usage_metadata.get("promptTokenCount", 0),
+            completion_tokens=usage_metadata.get("candidatesTokenCount", 0),
+            total_tokens=tokens_used,
+            success=True,
         )
 
         return AuditResult(
@@ -212,10 +230,17 @@ async def audit_candidate(
             corrected=corrected,
             approved=approved,
             reason=reason,
+            tokens_used=tokens_used,
         )
 
     except httpx.HTTPStatusError as e:
         logger.error("Gemini API HTTP error: %s – %s", e.response.status_code, e.response.text[:300])
+        log_gemini_call(
+            user_id=user_id,
+            call_type="audit",
+            success=False,
+            error_message=f"HTTP {e.response.status_code}",
+        )
         return AuditResult(
             original=original,
             corrected=corrected,
@@ -224,6 +249,12 @@ async def audit_candidate(
         )
     except (json.JSONDecodeError, KeyError, IndexError) as e:
         logger.error("Failed to parse Gemini response: %s", e)
+        log_gemini_call(
+            user_id=user_id,
+            call_type="audit",
+            success=False,
+            error_message=f"Parse error: {str(e)[:100]}",
+        )
         return AuditResult(
             original=original,
             corrected=corrected,
@@ -232,6 +263,12 @@ async def audit_candidate(
         )
     except Exception as e:
         logger.error("Gemini audit failed: %s", e)
+        log_gemini_call(
+            user_id=user_id,
+            call_type="audit",
+            success=False,
+            error_message=str(e)[:200],
+        )
         return AuditResult(
             original=original,
             corrected=corrected,

@@ -10,6 +10,7 @@ import type {
   SessionDetail,
   SessionSummary,
   TokenResponse,
+  TokenStats,
   TranscriptSegment,
   User,
 } from "./types";
@@ -165,6 +166,10 @@ export function importPlainText(text: string): Promise<{ session_key: string; st
 
 export function listSessions() {
   return request<{ sessions: SessionSummary[] }>("/sessions");
+}
+
+export function getTokenStats() {
+  return request<TokenStats>("/token-stats");
 }
 
 export function getSession(key: string) {

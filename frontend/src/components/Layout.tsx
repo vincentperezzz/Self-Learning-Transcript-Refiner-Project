@@ -1,7 +1,7 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { clearToken, getMe } from "../api";
-import type { User } from "../types";
+import { useEffect, useState, useRef } from "react";
+import { clearToken, getMe, getTokenStats } from "../api";
+import type { User, TokenStats } from "../types";
 import StatusBar from "./StatusBar";
 
 const NAV = [
@@ -16,9 +16,17 @@ const NAV = [
   { to: "/account", label: "Account", icon: "👤" },
 ];
 
+function formatTokenCount(count: number): string {
+  if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(2)}M`;
+  if (count >= 1_000) return `${(count / 1_000).toFixed(1)}K`;
+  return count.toString();
+}
+
 export default function Layout() {
   const navigate = useNavigate();
   const [user, setUser] = useState<User | null>(null);
+  const [tokenStats, setTokenStats] = useState<TokenStats | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     getMe()
@@ -27,12 +35,31 @@ export default function Layout() {
         clearToken();
         navigate("/login");
       });
+    
+    // Fetch token stats
+    getTokenStats().then(setTokenStats).catch(() => {});
+    
+    // Poll for token stats every 30 seconds
+    pollRef.current = setInterval(() => {
+      getTokenStats().then(setTokenStats).catch(() => {});
+    }, 30000);
+    
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, [navigate]);
 
   function handleLogout() {
     clearToken();
     navigate("/login");
   }
+
+  // Determine progress bar color based on usage
+  const getProgressColor = (percentage: number) => {
+    if (percentage >= 90) return "bg-red-500";
+    if (percentage >= 70) return "bg-amber-500";
+    return "bg-sky-500";
+  };
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -65,8 +92,75 @@ export default function Layout() {
           ))}
         </nav>
 
-        <div className="p-3 border-t border-gray-800 space-y-2">
+        <div className="p-3 border-t border-gray-800 space-y-3">
           <StatusBar />
+          
+          {/* Gemini Usage Stats - All 3 Metrics */}
+          {tokenStats && (
+            <div className="space-y-2">
+              <div className="text-[10px] text-gray-500 flex items-center gap-1 mb-1">
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                <span>Gemini 3.1 Flash Lite</span>
+              </div>
+              
+              {/* RPM - Requests Per Minute */}
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between text-[9px] text-gray-500">
+                  <span>RPM</span>
+                  <span>{tokenStats.requests_per_minute} / {tokenStats.rpm_limit}</span>
+                </div>
+                <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${getProgressColor((tokenStats.requests_per_minute / tokenStats.rpm_limit) * 100)}`}
+                    style={{ width: `${Math.min((tokenStats.requests_per_minute / tokenStats.rpm_limit) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              
+              {/* TPM - Tokens Per Minute */}
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between text-[9px] text-gray-500">
+                  <span>TPM</span>
+                  <span>{formatTokenCount(tokenStats.tokens_per_minute)} / {formatTokenCount(tokenStats.tpm_limit)}</span>
+                </div>
+                <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${getProgressColor((tokenStats.tokens_per_minute / tokenStats.tpm_limit) * 100)}`}
+                    style={{ width: `${Math.min((tokenStats.tokens_per_minute / tokenStats.tpm_limit) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              
+              {/* RPD - Requests Per Day */}
+              <div className="space-y-0.5">
+                <div className="flex items-center justify-between text-[9px] text-gray-500">
+                  <span>RPD</span>
+                  <span>{tokenStats.requests_today} / {tokenStats.rpd_limit}</span>
+                </div>
+                <div className="h-1 bg-gray-800 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full rounded-full transition-all duration-500 ${getProgressColor((tokenStats.requests_today / tokenStats.rpd_limit) * 100)}`}
+                    style={{ width: `${Math.min((tokenStats.requests_today / tokenStats.rpd_limit) * 100, 100)}%` }}
+                  />
+                </div>
+              </div>
+              
+              {/* All-time totals */}
+              <div className="pt-1 border-t border-gray-800/50 space-y-0.5">
+                <div className="flex items-center justify-between text-[8px] text-gray-600">
+                  <span>Total sessions</span>
+                  <span>{tokenStats.sessions_with_gemini}</span>
+                </div>
+                <div className="flex items-center justify-between text-[8px] text-gray-600">
+                  <span>Total tokens</span>
+                  <span>{formatTokenCount(tokenStats.total_tokens)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          
           {user && (
             <div className="flex items-center justify-between text-xs text-gray-500">
               <span>

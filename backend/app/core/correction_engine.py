@@ -17,7 +17,7 @@ import re
 from typing import Callable, Optional
 
 from app.core.correction_log import CorrectionLogger
-from app.core.gemini_corrector import GeminiCorrection, correct_transcript_sync
+from app.core.gemini_corrector import GeminiCorrection, TokenUsage, correct_transcript_sync
 from app.core.lexicon import LexiconChecker
 from app.core.ngram_auditor import NGramAuditor
 from app.core.semantic_anchors import SemanticAnchorManager
@@ -113,12 +113,22 @@ class CorrectionEngine:
     # Public
     # ------------------------------------------------------------------
 
-    def refine(self, request: RefinementRequest, on_stage: Callable[[str], None] | None = None) -> RefinementResponse:
+    def refine(
+        self, 
+        request: RefinementRequest, 
+        on_stage: Callable[[str], None] | None = None,
+        user_id: Optional[int] = None,
+        session_id: Optional[int] = None,
+    ) -> RefinementResponse:
         """Run the full correction pipeline on a list of segments."""
 
         segments = request.segments
         refined_segments: list[RefinedSegment] = []
         total_corrections = 0
+        token_usage = TokenUsage()  # Track Gemini token usage
+        # Store user_id/session_id for Gemini calls
+        self._current_user_id = user_id
+        self._current_session_id = session_id
 
         # --- Pass 1: Lexicon + N-Gram + post-processing per segment ---
         all_flagged: list[dict] = []
@@ -201,11 +211,13 @@ class CorrectionEngine:
                 len(gemini_input), len(refined_segments), len(relevant_unknown)
             )
 
-            gemini_corrections = correct_transcript_sync(
+            gemini_corrections, token_usage = correct_transcript_sync(
                 segments=gemini_input,
                 low_confidence_words=relevant_flagged if relevant_flagged else None,
                 applied_rules=applied_lexicon_rules if applied_lexicon_rules else None,
                 unknown_words=relevant_unknown if relevant_unknown else None,
+                user_id=self._current_user_id,
+                session_id=self._current_session_id,
             )
 
             # Apply Gemini corrections and auto-learn
@@ -276,6 +288,9 @@ class CorrectionEngine:
         return RefinementResponse(
             segments=refined_segments,
             total_corrections=total_corrections,
+            tokens_used=token_usage.total_tokens,
+            prompt_tokens=token_usage.prompt_tokens,
+            completion_tokens=token_usage.completion_tokens,
         )
 
     # ------------------------------------------------------------------

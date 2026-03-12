@@ -43,6 +43,9 @@ export interface RefinedSegment {
 export interface RefinementResponse {
   segments: RefinedSegment[];
   total_corrections: number;
+  tokens_used: number;
+  prompt_tokens: number;
+  completion_tokens: number;
 }
 
 export interface HealthResponse {
@@ -72,6 +75,9 @@ export interface SessionSummary {
   processing_stage?: string | null;
   total_segments: number;
   total_corrections: number;
+  tokens_used: number;
+  prompt_tokens: number;
+  completion_tokens: number;
   created_at: string;
   completed_at?: string | null;
 }
@@ -81,6 +87,25 @@ export interface SessionDetail extends SessionSummary {
   completed_at?: string | null;
   result_json: RefinementResponse;
   error_message: string | null;
+}
+
+// Token Stats
+export interface TokenStats {
+  // All-time stats
+  total_tokens: number;
+  total_prompt_tokens: number;
+  total_completion_tokens: number;
+  total_sessions: number;
+  sessions_with_gemini: number;
+  // Per-minute stats (RPM & TPM)
+  requests_per_minute: number;
+  tokens_per_minute: number;
+  rpm_limit: number;
+  tpm_limit: number;
+  // Daily stats (RPD)
+  requests_today: number;
+  tokens_today: number;
+  rpd_limit: number;
 }
 
 // Lexicon

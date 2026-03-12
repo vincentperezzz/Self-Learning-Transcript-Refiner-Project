@@ -760,6 +760,7 @@ flowchart TD
         GLOSS[(📖 DOMAIN GLOSSARY<br/>Terms per anchor_mode)]
         NGRAM[(📊 N-GRAM FREQUENCY<br/>Trigram statistics)]
         CLOG[(📋 CORRECTION LOG<br/>All corrections tracked)]
+        GLOG[(⚡ GEMINI API LOGS<br/>RPM • TPM • RPD tracking)]
     end
     
     subgraph L1Layer[Layer 1: Lexicon]
@@ -791,6 +792,7 @@ flowchart TD
     
     GLOSS -.->|Glossary in prompt| L3
     L3 -.->|Log corrections| CLOG
+    L3 -.->|Log API call| GLOG
     LEARN -.->|Self-Learning Loop| LEX
     L3 --> FIN
     
@@ -846,6 +848,32 @@ flowchart TD
 | `domain_glossary` | Domain-specific terms per anchor mode (fed to Gemini + N-gram) | anchor_mode, term, UNIQUE(anchor_mode, term) |
 | `users` | Authentication accounts | username, password_hash, role |
 | `transcription_sessions` | Saved refinement results with full JSON data | session_key, status, processing_stage, result_json, completed_at |
+| `gemini_api_logs` | Gemini API call tracking for rate limit monitoring | user_id, session_id, call_type, model, prompt_tokens, completion_tokens, total_tokens, success, error_message, created_at |
+
+### Gemini API Rate Limit Tracking
+
+The `gemini_api_logs` table tracks every Gemini API call for accurate rate limit monitoring:
+
+| Column | Type | Purpose |
+|---|---|---|
+| `call_type` | TEXT | Type of call: `correction` (L3), `human_correction` (Correct with Gemini), `audit` (rule promotion) |
+| `model` | TEXT | Gemini model used (e.g., `gemini-2.5-flash`) |
+| `prompt_tokens` | INTEGER | Input token count |
+| `completion_tokens` | INTEGER | Output token count |
+| `total_tokens` | INTEGER | Total tokens consumed |
+| `success` | BOOLEAN | Whether the API call succeeded |
+| `error_message` | TEXT | Error details if call failed |
+| `created_at` | TIMESTAMPTZ | Timestamp for rate limit calculations |
+
+**Rate Limit Metrics (Gemini 3.1 Flash Lite):**
+- **RPM** (Requests Per Minute): 15 requests/minute
+- **TPM** (Tokens Per Minute): 250,000 tokens/minute
+- **RPD** (Requests Per Day): 500 requests/day
+
+The `/api/v1/token-stats` endpoint queries this table to display real-time usage in the sidebar:
+- Shows per-minute stats (RPM, TPM) based on calls in the last 60 seconds
+- Shows daily stats (RPD) based on calls since midnight
+- Shows all-time totals for historical tracking
 
 ## API Endpoints
 
@@ -858,6 +886,7 @@ flowchart TD
 | POST | `/api/v1/auth/users` | Create user (admin) |
 | DELETE | `/api/v1/auth/users/{id}` | Delete user (admin) |
 | GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/token-stats` | Get Gemini API usage stats (RPM, TPM, RPD, totals) |
 | POST | `/api/v1/transcribe` | Upload audio, transcribe + refine |
 | POST | `/api/v1/refine` | Refine raw segments (manual) |
 | GET | `/api/v1/sessions` | List all sessions |

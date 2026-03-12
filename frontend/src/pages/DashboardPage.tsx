@@ -297,12 +297,13 @@ export default function DashboardPage() {
               className="h-3.5 w-3.5 rounded border-gray-600 bg-gray-800 text-sky-500 focus:ring-sky-500 focus:ring-offset-0 cursor-pointer"
             />
             <div className="flex flex-1 text-[11px] uppercase tracking-wider text-gray-500">
-              <div className="w-[40%] min-w-0">File</div>
-              <div className="w-24">Speaker</div>
+              <div className="w-[35%] min-w-0">File</div>
+              <div className="w-20">Speaker</div>
               <div className="w-24 text-center">Status</div>
-              <div className="w-16 text-center">Seg</div>
+              <div className="w-14 text-center">Seg</div>
               <div className="w-14 text-center">Fixes</div>
-              <div className="w-16 text-center">Time</div>
+              <div className="w-16 text-center">Tokens</div>
+              <div className="w-14 text-center">Time</div>
               <div className="flex-1 min-w-0">Date</div>
               <div className="w-10"></div>
             </div>
@@ -327,12 +328,12 @@ export default function DashboardPage() {
                 onClick={() => navigate(`/sessions/${s.session_key}`)}
               >
               {/* File */}
-              <div className="w-[40%] min-w-0 text-sm text-gray-200 truncate font-medium pr-2" title={s.filename}>
+              <div className="w-[35%] min-w-0 text-sm text-gray-200 truncate font-medium pr-2" title={s.filename}>
                 {s.filename}
               </div>
 
               {/* Speaker */}
-              <div className="w-24 text-sm text-gray-400">
+              <div className="w-20 text-sm text-gray-400">
                 {s.speaker ? (
                   <span
                     className={`px-2 py-0.5 rounded text-xs whitespace-nowrap ${
@@ -371,7 +372,7 @@ export default function DashboardPage() {
               </div>
 
               {/* Segments */}
-              <div className="w-16 text-center text-sm text-gray-400">
+              <div className="w-14 text-center text-sm text-gray-400">
                 {s.status === "completed" ? s.total_segments : "—"}
               </div>
 
@@ -390,8 +391,23 @@ export default function DashboardPage() {
                 )}
               </div>
 
+              {/* Tokens */}
+              <div className="w-16 text-center">
+                {s.status === "completed" ? (
+                  s.tokens_used > 0 ? (
+                    <span className="text-xs text-violet-400 font-medium" title={`${s.tokens_used.toLocaleString()} tokens`}>
+                      {s.tokens_used >= 1000 ? `${(s.tokens_used / 1000).toFixed(1)}K` : s.tokens_used}
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-600">—</span>
+                  )
+                ) : (
+                  <span className="text-gray-600">—</span>
+                )}
+              </div>
+
               {/* Duration */}
-              <div className="w-16 text-center text-xs text-gray-500 tabular-nums">
+              <div className="w-14 text-center text-xs text-gray-500 tabular-nums">
                 {formatDuration(s.created_at, s.completed_at)}
               </div>
 
