@@ -373,11 +373,11 @@ function SegmentRow({
   const hasFixes = seg.corrections.length > 0;
   const changed = seg.original_text !== seg.refined_text;
 
-  async function handleDownvote(original: string, corrected: string, action: "blocklist" | "demote" | "both", corrIdx: number) {
+  async function handleDownvote(original: string, corrected: string, action: "blocklist" | "demote", corrIdx: number) {
     setDownvotingIdx(corrIdx);
     setShowDownvoteMenu(null);
     try {
-      await downvoteCorrection({ original, corrected, action });
+      await downvoteCorrection({ original, corrected, action, sessionKey, segIndex });
       onCorrected();
     } catch {
       // ignore
@@ -387,11 +387,12 @@ function SegmentRow({
   }
 
   async function handleSendCorrection() {
-    if (!instruction.trim()) return;
+    // If empty, use default refinement instruction
+    const finalInstruction = instruction.trim() || "Refine and correct this segment";
     setSending(true);
     setChatError("");
     try {
-      await correctSegmentWithGemini(sessionKey, segIndex, instruction.trim());
+      await correctSegmentWithGemini(sessionKey, segIndex, finalInstruction);
       setInstruction("");
       setShowChat(false);
       onCorrected();
@@ -548,7 +549,7 @@ function SegmentRow({
       {showChat && (
         <div className="mb-3 p-3 rounded-lg bg-gray-900/80 border border-violet-800/40 space-y-2">
           <p className="text-[11px] text-gray-500">
-            Describe what needs to be corrected. Gemini will apply the fix and add it to the lexicon.
+            Describe what needs to be corrected, or leave empty to let Gemini refine the segment.
           </p>
           <div className="flex gap-2">
             <input
@@ -562,10 +563,10 @@ function SegmentRow({
             />
             <button
               onClick={handleSendCorrection}
-              disabled={sending || !instruction.trim()}
-              className="px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              disabled={sending}
+              className="px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 text-white text-sm font-medium transition-colors disabled:opacity-50 whitespace-nowrap"
             >
-              {sending ? "Sending..." : "Send"}
+              {sending ? "Sending..." : instruction.trim() ? "Send" : "Refine Segment"}
             </button>
           </div>
           {chatError && <p className="text-xs text-red-400">{chatError}</p>}
@@ -625,15 +626,6 @@ function SegmentRow({
                       <path fillRule="evenodd" d="M14.707 10.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 12.586V5a1 1 0 012 0v7.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
                     </svg>
                     Demote / Delete rule
-                  </button>
-                  <button
-                    onClick={() => handleDownvote(c.original, c.corrected, "both", ci)}
-                    className="w-full text-left px-3 py-1.5 text-xs text-gray-400 hover:bg-gray-700/50 flex items-center gap-2"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                    </svg>
-                    Both (demote + blocklist)
                   </button>
                 </div>
               )}

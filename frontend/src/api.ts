@@ -280,10 +280,12 @@ export function demoteLexiconRule(id: number) {
 export function downvoteCorrection(payload: {
   original: string;
   corrected: string;
-  action: "blocklist" | "demote" | "both";
+  action: "blocklist" | "demote";
+  sessionKey: string;
+  segIndex: number;
   reason?: string;
 }) {
-  return request<{ status: string; blocklisted: boolean; demoted: boolean; deleted: boolean }>(
+  return request<{ status: string; blocklisted: boolean; demoted: boolean; deleted: boolean; reverted: boolean }>(
     "/corrections/downvote",
     {
       method: "POST",

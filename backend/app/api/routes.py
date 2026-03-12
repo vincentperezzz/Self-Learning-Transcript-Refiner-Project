@@ -687,16 +687,27 @@ def correct_segment(
 
         # Persist updated result_json
         total_new = sum(1 for c in changes if c.get("original") and c.get("corrected"))
+        tokens_used = gemini_result.get("tokens_used", 0)
         with get_db() as conn:
             conn.execute(
                 "UPDATE transcription_sessions SET result_json = %s, "
-                "total_corrections = total_corrections + %s WHERE id = %s",
-                (json.dumps(result), total_new, row["id"]),
+                "total_corrections = total_corrections + %s, "
+                "tokens_used = tokens_used + %s WHERE id = %s",
+                (json.dumps(result), total_new, tokens_used, row["id"]),
             )
 
         # Flush lexicon cache
         from app.cache import cache_delete_pattern
         cache_delete_pattern("lexicon:*")
+    else:
+        # No changes but still update token usage
+        tokens_used = gemini_result.get("tokens_used", 0)
+        if tokens_used > 0:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE transcription_sessions SET tokens_used = tokens_used + %s WHERE id = %s",
+                    (tokens_used, row["id"]),
+                )
 
     return {
         "corrected_text": corrected_text,
@@ -945,27 +956,32 @@ def downvote_correction(
     user: dict = Depends(get_current_user),
 ) -> dict:
     """
-    Downvote a correction — blocklist it and optionally demote from lexicon.
+    Downvote a correction — blocklist it and/or demote from lexicon.
+    Also reverts the segment's text by replacing corrected with original.
 
     Payload:
-        original: str - the wrong phrase
+        original: str - the wrong phrase (original text before correction)
         corrected: str - the corrected phrase
-        action: "blocklist" | "demote" | "both"
+        action: "blocklist" | "demote"
+        sessionKey: str - session key to update
+        segIndex: int - segment index to revert
         reason: str (optional) - why it's being downvoted
     """
     original = payload.get("original", "").strip()
     corrected = payload.get("corrected", "").strip()
     action = payload.get("action", "blocklist")
+    session_key = payload.get("sessionKey", "")
+    seg_index = payload.get("segIndex")
     reason = payload.get("reason", "User downvoted from session detail")
 
     if not original or not corrected:
         raise HTTPException(status_code=400, detail="original and corrected are required")
 
-    results = {"blocklisted": False, "demoted": False, "deleted": False}
+    results = {"blocklisted": False, "demoted": False, "deleted": False, "reverted": False}
 
     with get_db() as conn:
         # Always blocklist to prevent re-learning
-        if action in ("blocklist", "both"):
+        if action == "blocklist":
             try:
                 conn.execute(
                     "INSERT INTO lexicon_blocklist (wrong_phrase, correct_phrase, reason, banned_by) "
@@ -973,7 +989,6 @@ def downvote_correction(
                     "ON CONFLICT (wrong_phrase, correct_phrase) DO NOTHING",
                     (original, corrected, reason, user["username"]),
                 )
-                # Keep correction_log entry so it shows "Blocklisted" status
                 results["blocklisted"] = True
             except Exception:
                 pass  # Already blocklisted
@@ -987,7 +1002,7 @@ def downvote_correction(
         rule = cur.fetchone()
 
         if rule:
-            if action == "demote" or action == "both":
+            if action == "demote":
                 if rule["is_permanent"]:
                     # Demote to probationary
                     conn.execute(
@@ -999,6 +1014,52 @@ def downvote_correction(
                     # Already probationary — delete it
                     conn.execute("DELETE FROM lexicon WHERE id = %s", (rule["id"],))
                     results["deleted"] = True
+
+        # Revert the segment text in the session
+        if session_key and seg_index is not None:
+            cur = conn.execute(
+                "SELECT id, result_json FROM transcription_sessions "
+                "WHERE session_key = %s AND user_id = %s",
+                (session_key, user["id"]),
+            )
+            session_row = cur.fetchone()
+            
+            if session_row and session_row["result_json"]:
+                # Handle both string and dict (psycopg auto-parses JSON)
+                result_data = session_row["result_json"]
+                if isinstance(result_data, str):
+                    result_data = json.loads(result_data)
+                segments = result_data.get("segments", [])
+                
+                if 0 <= seg_index < len(segments):
+                    seg = segments[seg_index]
+                    refined_text = seg.get("refined_text", "")
+                    
+                    # Replace the corrected text back to original
+                    if corrected in refined_text:
+                        seg["refined_text"] = refined_text.replace(corrected, original)
+                        results["reverted"] = True
+                    
+                    # Remove this correction from the corrections array
+                    corrections = seg.get("corrections", [])
+                    seg["corrections"] = [
+                        c for c in corrections 
+                        if not (c.get("original") == original and c.get("corrected") == corrected)
+                    ]
+                    
+                    # Update the total_corrections count
+                    total_corrections = sum(
+                        len(s.get("corrections", [])) for s in segments
+                    )
+                    result_data["total_corrections"] = total_corrections
+                    
+                    # Save back to database
+                    conn.execute(
+                        "UPDATE transcription_sessions "
+                        "SET result_json = %s, total_corrections = %s "
+                        "WHERE id = %s",
+                        (json.dumps(result_data), total_corrections, session_row["id"]),
+                    )
 
         # Invalidate lexicon cache
         from app.cache import cache_delete_pattern
