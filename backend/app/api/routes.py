@@ -967,12 +967,17 @@ def downvote_correction(
         segIndex: int - segment index to revert
         reason: str (optional) - why it's being downvoted
     """
+    import logging
+    log = logging.getLogger(__name__)
+    
     original = payload.get("original", "").strip()
     corrected = payload.get("corrected", "").strip()
     action = payload.get("action", "blocklist")
     session_key = payload.get("sessionKey", "")
     seg_index = payload.get("segIndex")
     reason = payload.get("reason", "User downvoted from session detail")
+
+    print(f"DEBUG DOWNVOTE: original='{original}', corrected='{corrected}', action={action}, session_key={session_key}, seg_index={seg_index}")
 
     if not original or not corrected:
         raise HTTPException(status_code=400, detail="original and corrected are required")
@@ -1017,6 +1022,7 @@ def downvote_correction(
 
         # Revert the segment text in the session
         if session_key and seg_index is not None:
+            print(f"DEBUG: Attempting to revert segment {seg_index} in session {session_key}")
             cur = conn.execute(
                 "SELECT id, result_json FROM transcription_sessions "
                 "WHERE session_key = %s AND user_id = %s",
@@ -1030,22 +1036,30 @@ def downvote_correction(
                 if isinstance(result_data, str):
                     result_data = json.loads(result_data)
                 segments = result_data.get("segments", [])
+                print(f"DEBUG: Found {len(segments)} segments, checking index {seg_index}")
                 
                 if 0 <= seg_index < len(segments):
                     seg = segments[seg_index]
                     refined_text = seg.get("refined_text", "")
+                    print(f"DEBUG: Refined text (first 200): {refined_text[:200] if refined_text else ''}")
+                    print(f"DEBUG: Looking for corrected='{corrected}' in refined_text")
                     
                     # Replace the corrected text back to original
                     if corrected in refined_text:
                         seg["refined_text"] = refined_text.replace(corrected, original)
                         results["reverted"] = True
+                        print(f"DEBUG: REVERTED - replaced '{corrected}' with '{original}'")
+                    else:
+                        print(f"corrected text NOT FOUND in refined_text")
                     
                     # Remove this correction from the corrections array
                     corrections = seg.get("corrections", [])
+                    old_count = len(corrections)
                     seg["corrections"] = [
                         c for c in corrections 
                         if not (c.get("original") == original and c.get("corrected") == corrected)
                     ]
+                    print(f"DEBUG: Removed {old_count - len(seg['corrections'])} corrections from array")
                     
                     # Update the total_corrections count
                     total_corrections = sum(
@@ -1060,6 +1074,11 @@ def downvote_correction(
                         "WHERE id = %s",
                         (json.dumps(result_data), total_corrections, session_row["id"]),
                     )
+                    print(f"DEBUG: Updated session with new total_corrections={total_corrections}")
+            else:
+                print(f"DEBUG: Session not found or no result_json")
+        else:
+            print(f"DEBUG: Missing session_key or seg_index: session_key='{session_key}', seg_index={seg_index}")
 
         # Invalidate lexicon cache
         from app.cache import cache_delete_pattern
