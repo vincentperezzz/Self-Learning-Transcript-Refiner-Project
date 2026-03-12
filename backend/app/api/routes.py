@@ -1047,9 +1047,11 @@ def downvote_correction(
                     print(f"DEBUG: Refined text (first 200): {refined_text[:200] if refined_text else ''}")
                     print(f"DEBUG: Looking for corrected='{corrected}' in refined_text")
                     
-                    # Replace the corrected text back to original
+                    # Replace the corrected text back to original (only ONE occurrence)
                     if corrected in refined_text:
-                        seg["refined_text"] = refined_text.replace(corrected, original)
+                        # Use replace with count=1 to only replace the first match
+                        # This prevents breaking other corrections with the same corrected text
+                        seg["refined_text"] = refined_text.replace(corrected, original, 1)
                         results["reverted"] = True
                         print(f"DEBUG: REVERTED - replaced '{corrected}' with '{original}'")
                     else:
