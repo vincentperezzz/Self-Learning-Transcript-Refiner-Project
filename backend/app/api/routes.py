@@ -371,6 +371,9 @@ def _process_text_import(
         result_data = {
             "segments": [seg.model_dump() for seg in result.segments],
             "total_corrections": result.total_corrections,
+            "tokens_used": result.tokens_used,
+            "prompt_tokens": result.prompt_tokens,
+            "completion_tokens": result.completion_tokens,
         }
 
         with get_db() as conn:
@@ -378,12 +381,16 @@ def _process_text_import(
                 "UPDATE transcription_sessions "
                 "SET status = 'completed', processing_stage = 'done', "
                 "result_json = %s, total_segments = %s, total_corrections = %s, "
+                "tokens_used = %s, prompt_tokens = %s, completion_tokens = %s, "
                 "completed_at = NOW() "
                 "WHERE id = %s",
                 (
                     json.dumps(result_data),
                     len(result.segments),
                     result.total_corrections,
+                    result.tokens_used,
+                    result.prompt_tokens,
+                    result.completion_tokens,
                     session_id,
                 ),
             )
