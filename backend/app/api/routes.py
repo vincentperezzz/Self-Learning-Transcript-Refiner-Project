@@ -604,6 +604,7 @@ def correct_segment(
 
     seg = segments[seg_idx]
     original_text = seg["refined_text"]
+    segment_anchor_mode = seg.get("anchor_mode")  # Get anchor mode from segment
 
     # Call Gemini with user instruction
     gemini_result = correct_segment_with_instruction(
@@ -661,11 +662,13 @@ def correct_segment(
                 try:
                     with get_db() as conn:
                         conn.execute(
-                            "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, is_permanent) "
-                            "VALUES (%s, %s, %s, FALSE) ON CONFLICT (wrong_phrase) DO UPDATE "
+                            "INSERT INTO lexicon (wrong_phrase, correct_phrase, context_hint, anchor_mode, is_permanent) "
+                            "VALUES (%s, %s, %s, %s, FALSE) ON CONFLICT (wrong_phrase) DO UPDATE "
                             "SET correct_phrase = EXCLUDED.correct_phrase, "
-                            "context_hint = EXCLUDED.context_hint, is_permanent = FALSE",
-                            (orig.lower(), corr, "human-guided Gemini correction (probationary)"),
+                            "context_hint = EXCLUDED.context_hint, "
+                            "anchor_mode = COALESCE(EXCLUDED.anchor_mode, lexicon.anchor_mode), "
+                            "is_permanent = FALSE",
+                            (orig.lower(), corr, "human-guided Gemini correction (probationary)", segment_anchor_mode),
                         )
                 except Exception:
                     pass
