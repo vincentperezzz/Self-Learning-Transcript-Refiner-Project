@@ -46,7 +46,7 @@ Collection calls follow a structured QA-graded flow. The agent is scored on each
 
 1. OPENING & GREETING (5%)
    - Must include "Kamusta" or polite greeting
-   - Agent identifies self and agency: "This is [Name] from SP Madrid Law Firm"
+   - Agent identifies self and agency: "This is <agent_name> from SP Madrid Law Firm"
    - Mentions "over the recorded line" / consent to record
 
 2. ACCOUNT VERIFICATION (5%)
@@ -167,6 +167,10 @@ mangled, financial terms, call-center script phrases, collection-specific termin
 "po" or "por" — these are VALID English words in code-switched sentences
 - NEVER change redaction placeholders like [MONTH], [VALUE], [PERSON], [ORGANIZATION], \
 [BANK NAME], [PAYMENT MODE] — these are intentional masked values, preserve them exactly
+- NEVER REDACT OR MASK any information — do NOT replace names, dates, amounts, or any \
+values with placeholders like [NAME], [AMOUNT], [DATE], etc. You fix transcription errors ONLY.
+- Personal information (names, birthdates, addresses, phone numbers, account numbers) must be \
+preserved exactly as transcribed — your job is to correct ASR errors, NOT to anonymize data
 
 ═══ IMPORTANT CONTEXT ═══
 - "ho/po" are Filipino politeness particles — do NOT change them
