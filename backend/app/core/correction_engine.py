@@ -401,6 +401,10 @@ class CorrectionEngine:
             for c in lex_corrections:
                 protected.update(self.ngram_auditor.tokenize(c.corrected))
 
+        # Currency protection pattern - matches P/p followed by digits (e.g., P6,239.14)
+        # This pattern finds where the letter P is actually a peso prefix
+        currency_pattern = re.compile(r'[Pp]\d[\d,\.]*')
+
         details: list[CorrectionDetail] = []
         for cand in candidates:
             # Skip if the word being changed was introduced by lexicon
@@ -417,9 +421,24 @@ class CorrectionEngine:
             orig_phrase = " ".join(cand.original_trigram)
             sugg_phrase = " ".join(cand.suggested_trigram)
 
-            # Perform the replacement (case-insensitive, first occurrence)
-            import re
+            # Currency guard: If the changed word is 'p' (peso prefix), check if it's part
+            # of a currency amount in the actual text (e.g., P6,239.14)
+            # Use a more precise check: look for the original phrase with P followed by digits
+            if 'p' in changed:
+                # Build pattern to find the phrase where P is followed by digits  
+                # e.g., "due is P6,239.14" should be protected when trying to replace "due is p"
+                currency_context = re.compile(
+                    re.escape(orig_phrase).replace(r'\ p', r'\ [Pp]') + r'\d[\d,\.]*',
+                    re.IGNORECASE
+                )
+                if currency_context.search(text):
+                    logger.debug(
+                        "N-gram skipped (currency protection): %s → %s",
+                        cand.original_trigram, cand.suggested_trigram,
+                    )
+                    continue
 
+            # Perform the replacement (case-insensitive, first occurrence)
             pattern = re.compile(re.escape(orig_phrase), re.IGNORECASE)
             new_text = pattern.sub(sugg_phrase, text, count=1)
             if new_text != text:
