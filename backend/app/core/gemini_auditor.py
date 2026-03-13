@@ -123,7 +123,7 @@ async def audit_candidate(
     user_id: Optional[int] = None,
 ) -> AuditResult:
     """
-    Send a promotion candidate to Gemini 2.5 Flash for validation.
+    Send a promotion candidate to External AI API for validation.
 
     Args:
         original: The wrong phrase
