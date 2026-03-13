@@ -148,8 +148,10 @@ export default function DashboardPage() {
   const pagedSessions = filteredSessions.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+    <div className="flex flex-col h-[calc(100vh-64px)]">
+      {/* Sticky header section */}
+      <div className="sticky top-0 bg-gray-950 z-10 pb-4 space-y-4">
+      <div className="flex items-center justify-between gap-4 pt-2">
         <h1 className="text-2xl font-bold text-white">Past Refinements</h1>
         <div className="flex items-center gap-3 flex-1 justify-end">
           {/* Search input */}
@@ -249,7 +251,10 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+      </div>
 
+      {/* Scrollable content area */}
+      <div className="flex-1 overflow-y-auto min-h-0">
       {loading ? (
         <p className="text-gray-500 text-sm">Loading sessions...</p>
       ) : sessions.length === 0 ? (
@@ -445,6 +450,7 @@ export default function DashboardPage() {
         />
         </div>
       )}
+      </div>
     </div>
   );
 }

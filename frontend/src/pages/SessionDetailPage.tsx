@@ -236,9 +236,11 @@ export default function SessionDetailPage() {
   ).length;
 
   return (
-    <div className="space-y-6">
+    <div className="flex flex-col h-[calc(100vh-64px)]">
+      {/* Sticky header section */}
+      <div className="sticky top-0 bg-gray-950 z-10 pb-4 space-y-4">
       {/* Header */}
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between pt-2">
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate("/")}
@@ -336,12 +338,15 @@ export default function SessionDetailPage() {
           </button>
         </div>
       </div>
+      </div>
 
-      {/* Segments */}
-      <div className="space-y-1">
-        {segments.map((seg, i) => (
-          <SegmentRow key={i} seg={seg} view={view} segIndex={i} sessionKey={key!} onCorrected={loadSession} />
-        ))}
+      {/* Scrollable segments area */}
+      <div className="flex-1 overflow-y-auto min-h-0">
+        <div className="space-y-1">
+          {segments.map((seg, i) => (
+            <SegmentRow key={i} seg={seg} view={view} segIndex={i} sessionKey={key!} onCorrected={loadSession} />
+          ))}
+        </div>
       </div>
     </div>
   );
