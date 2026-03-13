@@ -421,6 +421,14 @@ class CorrectionEngine:
             orig_phrase = " ".join(cand.original_trigram)
             sugg_phrase = " ".join(cand.suggested_trigram)
 
+            # Blocklist check for N-gram corrections
+            if self._is_blocklisted(orig_phrase, sugg_phrase):
+                logger.debug(
+                    "N-gram skipped (blocklisted): %s → %s",
+                    cand.original_trigram, cand.suggested_trigram,
+                )
+                continue
+
             # Currency guard: If the changed word is 'p' (peso prefix), check if it's part
             # of a currency amount in the actual text (e.g., P6,239.14)
             # Use a more precise check: look for the original phrase with P followed by digits
