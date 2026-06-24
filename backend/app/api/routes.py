@@ -1,4 +1,4 @@
-"""Phoenix 3.0 API routes."""
+"""CostCutter Refiner API routes."""
 
 from __future__ import annotations
 
@@ -1810,4 +1810,4 @@ def get_coword_network(
 
 @router.get("/health")
 def health() -> dict:
-    return {"status": "ok", "service": "phoenix-3.0-refiner"}
+    return {"status": "ok", "service": "costcutter-refiner"}

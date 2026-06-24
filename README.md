@@ -1,16 +1,16 @@
-# Phoenix 3.0 – Self-Learning Transcript Refiner
+# CostCutter Refiner – AI Dependency CostReduction Transcript Refiner
 
-Phoenix 3.0 is a **deterministic-first transcript correction system** for call-center and customer-service audio. It takes raw Whisper transcriptions (or pasted plain text) and refines them through a layered pipeline of lexicon rules, statistical N-gram analysis, and AI-assisted correction — then **learns from every fix** so accuracy improves over time.
+CostCutter Refiner is a **deterministic-first transcript correction system** for call-center and customer-service audio. It takes raw Whisper transcriptions (or pasted plain text) and refines them through a layered pipeline of lexicon rules, statistical N-gram analysis, and AI-assisted correction — then **learns from every fix** so accuracy improves over time.
 
-Built for bilingual English/Filipino call recordings (collections, banking, verification), Phoenix targets the kinds of errors Whisper makes repeatedly: misheard domain terms, wrong casing, phonetically similar substitutions, and context-dependent word swaps.
+Built for bilingual English/Filipino call recordings (collections, banking, verification), CostCutter Refiner targets the kinds of errors Whisper makes repeatedly: misheard domain terms, wrong casing, phonetically similar substitutions, and context-dependent word swaps.
 
-![Phoenix 3.0 Dashboard — Past Refinements view after login](docs/images/dashboard.png)
+![CostCutter Refiner Dashboard — Past Refinements view after login](docs/images/dashboard.png)
 
 ---
 
 ## What It Does
 
-When you upload an audio file or import a transcript, Phoenix:
+When you upload an audio file or import a transcript, CostCutter Refiner:
 
 1. **Transcribes** audio via Groq (Whisper `large-v3-turbo`) with per-word confidence scores
 2. **Classifies** each segment's intent using Semantic Anchors (Greeting, Verification, Negotiation, Closing, etc.)
@@ -134,7 +134,7 @@ Click any session on the Dashboard to open its detail view:
 
 ## How Correction Works
 
-Phoenix applies corrections in a fixed order. Each layer builds on the previous one.
+CostCutter Refiner applies corrections in a fixed order. Each layer builds on the previous one.
 
 ### Layer 1 — Lexicon (Permanent Rules)
 
@@ -163,7 +163,7 @@ Remaining errors — especially unknown words flagged by N-Gram — are sent to 
 ## Project Structure
 
 ```
-phoenix-3/
+costcutter-refiner/
 ├── frontend/          # React + TypeScript + Vite + Tailwind CSS
 ├── backend/           # FastAPI + Python 3.12
 ├── config/            # pgAdmin server config
@@ -210,7 +210,7 @@ pgAdmin is included for direct database inspection:
 
 1. Open http://localhost:5050
 2. Login: `admin@phoenix.com` / `admin`
-3. Click **Phoenix DB** in the sidebar — database password: `phoenix`
+3. Click **CostCutter DB** in the sidebar — database password: `phoenix`
 4. Browse tables under **Schemas → public → Tables**
 
 Key tables: `lexicon`, `ngram_frequency`, `correction_log`, `transcription_sessions`, `semantic_anchors`, `domain_glossary`.

@@ -1,8 +1,8 @@
-# Phoenix 3.0 – Self-Learning Transcript Refiner
+# CostCutter Refiner – AI Dependency CostReduction Transcript Refiner
 
 ## System Overview
 
-Phoenix 3.0 is a **deterministic-first transcript correction system** that refines Whisper-generated transcripts using a 3-layer correction hierarchy. Rather than relying on a single AI model, it applies targeted, explainable corrections where each fix has a clear source and rationale.
+CostCutter Refiner is a **deterministic-first transcript correction system** that refines Whisper-generated transcripts using a 3-layer correction hierarchy. Rather than relying on a single AI model, it applies targeted, explainable corrections where each fix has a clear source and rationale.
 
 ### How Refinement Works
 
@@ -955,9 +955,9 @@ pgAdmin is included in the Docker setup for browsing the PostgreSQL database dir
 - Password: `admin`
 
 **Connecting to the database:**
-1. The **Phoenix DB** server is pre-configured in the sidebar
-2. Click on **Phoenix DB** — when prompted for the database password, enter: `phoenix`
-3. Navigate: **Phoenix DB → Databases → phoenix → Schemas → public → Tables**
+1. The **CostCutter DB** server is pre-configured in the sidebar
+2. Click on **CostCutter DB** — when prompted for the database password, enter: `phoenix`
+3. Navigate: **CostCutter DB → Databases → phoenix → Schemas → public → Tables**
 4. Right-click any table → **View/Edit Data → All Rows** to browse data
 
 **Tables you'll find:**

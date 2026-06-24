@@ -1,7 +1,7 @@
 {
   "Servers": {
     "1": {
-      "Name": "Phoenix DB",
+      "Name": "CostCutter DB",
       "Group": "Servers",
       "Host": "postgres",
       "Port": 5432,

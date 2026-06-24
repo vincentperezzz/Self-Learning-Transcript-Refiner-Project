@@ -1,4 +1,4 @@
-"""Pydantic schemas for Phoenix 3.0 API."""
+"""Pydantic schemas for CostCutter Refiner API."""
 
 from __future__ import annotations
 

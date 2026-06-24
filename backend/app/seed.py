@@ -604,7 +604,7 @@ def main() -> None:
     glossary_count = seed_domain_glossary()
     print(f"  -> {glossary_count} domain terms inserted.")
 
-    print("Done! Phoenix 3.0 database is ready.")
+    print("Done! CostCutter Refiner database is ready.")
 
 
 if __name__ == "__main__":

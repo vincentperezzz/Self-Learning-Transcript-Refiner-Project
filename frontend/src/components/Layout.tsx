@@ -67,9 +67,11 @@ export default function Layout() {
       <aside className="w-56 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0 h-screen sticky top-0">
         <div className="p-4 border-b border-gray-800">
           <h1 className="text-lg font-bold tracking-tight">
-            Phoenix <span className="text-sky-400">3.0</span>
+            Cost<span className="text-sky-400">Cutter</span> Refiner
           </h1>
-          <p className="text-[11px] text-gray-500 mt-0.5">Transcript Refiner</p>
+          <p className="text-[11px] text-gray-500 mt-0.5 leading-tight">
+            AI Dependency CostReduction Transcript Refiner
+          </p>
         </div>
 
         <nav className="flex-1 p-3 space-y-1">

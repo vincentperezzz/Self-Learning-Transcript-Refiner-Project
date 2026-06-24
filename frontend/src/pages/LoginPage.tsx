@@ -35,9 +35,11 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold tracking-tight">
-            Phoenix <span className="text-sky-400">3.0</span>
+            Cost<span className="text-sky-400">Cutter</span> Refiner
           </h1>
-          <p className="text-sm text-gray-500 mt-1">Self-Learning Transcript Refiner</p>
+          <p className="text-sm text-gray-500 mt-1">
+            AI Dependency CostReduction Transcript Refiner
+          </p>
         </div>
 
         <form

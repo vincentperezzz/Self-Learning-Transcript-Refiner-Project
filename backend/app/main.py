@@ -1,4 +1,4 @@
-"""Phoenix 3.0 – Self-Learning Transcript Refiner (FastAPI entry point)."""
+"""CostCutter Refiner – AI Dependency CostReduction Transcript Refiner (FastAPI entry point)."""
 
 from contextlib import asynccontextmanager
 
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Phoenix 3.0 – Transcript Refiner",
+    title="CostCutter Refiner – AI Dependency CostReduction Transcript Refiner",
     description=(
         "A self-learning, deterministic-first transcript refiner "
         "using Semantic Anchors, N-Gram Co-occurrence, and DistilBERT."

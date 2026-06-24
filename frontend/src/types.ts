@@ -1,4 +1,4 @@
-/* Types mirroring the Phoenix 3.0 backend schemas */
+/* Types mirroring the CostCutter Refiner backend schemas */
 
 export interface WordInfo {
   word: string;
